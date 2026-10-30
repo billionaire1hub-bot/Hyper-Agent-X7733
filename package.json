@@ -1,0 +1,24 @@
+{
+  "name": "hyper-agent-x7733",
+  "version": "1.6.0",
+  "private": true,
+  "description": "Hyper Agent X7733: ACP-compliant Base utility agent with live AI market intelligence and autonomous X publishing for Virtuals Protocol (Base mainnet)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "build": "node scripts/build-check.js",
+    "test": "node --test test/*.test.js",
+    "verify": "node scripts/verify-live.js",
+    "social:preview": "node scripts/social-preview.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "viem": "^2.38.0"
+  }
+}
