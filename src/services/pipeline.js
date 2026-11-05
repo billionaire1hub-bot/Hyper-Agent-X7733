@@ -62,12 +62,16 @@ import {
   onchainGasGated,
 } from "../chain/client.js";
 import { gasUnlockThresholdWei } from "./gas.js";
+import { executeCustomTask, customPreview } from "./custom.js";
 import { executeInsight, insightsPreview, INSIGHT_OFFERINGS } from "./insights.js";
 
 const LOCK_TTL_SECONDS = 180;
 const MIN_REMAINING_MS = 10_000;
 
 export async function runOffering({ offering, params, buyer, log, jobId, priceUsdc, bonusUsdc = 0 }) {
+  if (offering.custom) {
+    return executeCustomTask({ offering, params, buyer, log });
+  }
   switch (offering.id) {
     case "token_swap":
       return executeSwap({ params, buyer, log });
@@ -369,6 +373,10 @@ export async function executeAcpJob({ jobId, offeringId, params, buyer, quoteId 
 
 export async function previewOffering({ offering, params, buyer }) {
   const normalized = validateParams(offering, params);
+
+  if (offering.custom) {
+    return customPreview({ offering, params: normalized });
+  }
 
   const revenue = await previewRevenueOffering({ offering, params: normalized });
   if (revenue) return revenue;

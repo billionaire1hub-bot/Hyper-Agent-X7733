@@ -3,6 +3,7 @@ import express from "express";
 import { config } from "./config.js";
 import { AppError, asAppError } from "./lib/errors.js";
 import { logger } from "./lib/logger.js";
+import { maybeWakeOutreach, observePublicUrl, wakeOutreachCycle } from "./services/activation.js";
 import { a2aRouter } from "./routes/a2a.js";
 import { router } from "./routes/api.js";
 
@@ -47,6 +48,24 @@ app.use((req, res, next) => {
       durationMs: Date.now() - started,
     });
   });
+  next();
+});
+
+app.use(async (req, res, next) => {
+  try {
+    const activation = await observePublicUrl(req);
+    if (activation.changed) {
+      const wake = await wakeOutreachCycle(activation.url, { reason: "activation" });
+      req.log.info("outreach activation wake", { ok: wake.ok, status: wake.status || null });
+    } else if (!req.path.startsWith("/api/cron/")) {
+      const wake = await maybeWakeOutreach({ reason: "traffic" });
+      if (wake.ok || wake.status) {
+        req.log.info("outreach continuation wake", { ok: wake.ok, status: wake.status || null });
+      }
+    }
+  } catch (error) {
+    req.log.warn("outreach activation failed", { message: error.message });
+  }
   next();
 });
 

@@ -800,16 +800,126 @@ export const OFFERINGS = [
 
 const offeringIndex = new Map(OFFERINGS.map((offering) => [offering.id, offering]));
 
+/**
+ * A peer whose job fits none of the 50 registered offerings is served through
+ * this synthetic offering: it resolves by id, is priced deterministically from
+ * the requirement text and is deliberately absent from the public catalog and
+ * the agent card, so the registered 50 stay exactly as they are.
+ */
+export const CUSTOM_TASK_OFFERING_ID = "custom_task";
+const CUSTOM_TIER_MULTIPLIERS = [1, 1.5, 2, 2.5, 3];
+
+const CUSTOM_SIGNALS = [
+  {
+    key: "live_facts",
+    engine: "gemini",
+    weight: 1,
+    pattern: /\b(today|latest|current|now|news|headlines?|announc\w*|breaking|recent)\b|\bthis\s+(week|month|quarter|year)\b/i,
+  },
+  {
+    key: "onchain_context",
+    engine: "gemini",
+    weight: 1,
+    pattern: /(?:0x[a-fA-F0-9]{40}|\b(contract|token|pool|wallet|transaction|bridge|liquidity|allowance|holdings|portfolio|audit|honeypot|rug|scam)\b)/i,
+  },
+  {
+    key: "deep_reasoning",
+    engine: "gemini",
+    weight: 1,
+    pattern: /\b(strategy|architecture|design|optimi[sz]e|compare|comparativ\w*|evaluat\w*|research|analy[sz]\w*|forecast|predict\w*|model|framework|trade-?offs?|prioriti[sz]e|root cause|risk\w*)\b/i,
+  },
+  {
+    key: "structured_output",
+    engine: "groq",
+    weight: 1,
+    pattern: /\b(json|schema|table|csv|checklist|scorecard|matrix|yaml|structured)\b/i,
+  },
+  {
+    key: "bulk_items",
+    engine: "groq",
+    weight: 1,
+    pattern: /\b\d{1,3}\s+(tokens|items|entries|addresses|topics|pairs|options|ideas|lines|rows|wallets)\b/i,
+  },
+  {
+    key: "fast_generation",
+    engine: "groq",
+    weight: 0,
+    pattern: /\b(write|draft|copy|blog|article|thread|tweet|posts?|summar\w*|translat\w*|reword|rewrite|explain|slogan|tagline|names?)\b/i,
+  },
+];
+
+export function customPriceUsdc(complexity) {
+  const level = Math.min(5, Math.max(1, Math.round(Number(complexity) || 1)));
+  const raw = config.custom.basePriceUsdc * CUSTOM_TIER_MULTIPLIERS[level - 1];
+  return roundUsdcAmount(Math.min(config.custom.maxPriceUsdc, Math.max(config.custom.basePriceUsdc, raw)));
+}
+
+/**
+ * Routing and price come from the same deterministic read of the requirement,
+ * never from a model call: the escrow check has to be able to recompute the
+ * exact quote from the job description.
+ */
+export function assessCustomTask(requirement) {
+  const text = String(requirement ?? "").replace(/\s+/g, " ").trim().slice(0, config.custom.requirementMaxChars);
+  const matched = CUSTOM_SIGNALS.filter((signal) => signal.pattern.test(text));
+  let complexity = 1 + matched.reduce((sum, signal) => sum + signal.weight, 0);
+  if (text.length > 320) complexity += 1;
+  complexity = Math.min(5, Math.max(1, Math.round(complexity)));
+
+  const deep = matched.some((signal) => signal.engine === "gemini") || complexity >= config.custom.deepThreshold;
+  const signals = matched.map((signal) => signal.key);
+  return {
+    requirement: text,
+    complexity,
+    tier: complexity >= 5 ? "expert" : complexity >= 4 ? "deep" : complexity >= 2 ? "standard" : "quick",
+    engine: deep ? "gemini" : "groq",
+    fallbackEngine: deep ? "groq" : "gemini",
+    signals,
+    requiresGrounding: signals.includes("live_facts"),
+    requiresLiveContext: signals.includes("live_facts") || signals.includes("onchain_context"),
+    structured: signals.includes("structured_output") || signals.includes("bulk_items"),
+    priceUsdc: customPriceUsdc(complexity),
+    reasons: [
+      `complexity ${complexity}/5 from ${signals.length ? signals.join(", ") : "a plain generation brief"}`,
+      deep
+        ? `deep reasoning or live grounding required, so Gemini answers first with Groq as fallback`
+        : `fast generation, so Groq answers first with Gemini as fallback`,
+    ],
+  };
+}
+
+export function customTaskOffering() {
+  const priceUsdc = formatUsdcAmount(customPriceUsdc(1));
+  return {
+    id: CUSTOM_TASK_OFFERING_ID,
+    name: "Custom Task",
+    description:
+      "One-off work negotiated directly with the buyer when none of the 50 registered offerings fits. Routed to Groq for fast generation or to Gemini for deep reasoning plus live grounding.",
+    priceUsdc,
+    comparison: "Custom scope, priced from the brief",
+    slaSeconds: config.execution.slaSeconds,
+    category: "custom",
+    params: [
+      {
+        name: "requirement",
+        type: "string",
+        required: true,
+        description: `The task brief, ${config.custom.requirementMinChars}-${config.custom.requirementMaxChars} characters.`,
+      },
+    ],
+    custom: true,
+    priceUnits: usdcUnits(priceUsdc),
+    payment: { symbol: "USDC", address: USDC.address, decimals: USDC.decimals, chainId: config.chain.id },
+    competitor: null,
+  };
+}
+
 export function getOffering(offeringId) {
   const id = String(offeringId ?? "").trim().toLowerCase();
   const offering = offeringIndex.get(id);
-  if (!offering) {
-    throw AppError.notFound(
-      `Unknown offering "${offeringId}".`,
-      "UNKNOWN_OFFERING"
-    );
-  }
-  return offering;
+  if (offering) return offering;
+  if (config.custom.enabled && id === CUSTOM_TASK_OFFERING_ID) return customTaskOffering();
+  throw AppError.notFound(`Unknown offering "${offeringId}".`, "UNKNOWN_OFFERING");
 }
 
 export function offeringPublicJSON(offering) {
@@ -1311,6 +1421,19 @@ export function validateParams(offering, params = {}) {
       return {};
     case "gas_forecast":
       return {};
+    case CUSTOM_TASK_OFFERING_ID: {
+      if (!config.custom.enabled) {
+        throw AppError.badRequest("Custom tasks are disabled.", undefined, "CUSTOM_TASK_DISABLED");
+      }
+      const requirement = parseRequiredText(
+        params.requirement,
+        "requirement",
+        config.custom.requirementMinChars,
+        config.custom.requirementMaxChars
+      );
+      const assessment = assessCustomTask(requirement);
+      return { requirement: assessment.requirement, complexity: assessment.complexity };
+    }
     default:
       throw AppError.badRequest(`Offering ${offering.id} has no param schema.`, undefined, "UNKNOWN_OFFERING");
   }

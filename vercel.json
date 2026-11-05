@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "framework": null,
   "functions": {
     "api/index.js": {
-      "maxDuration": 60,
-      "memory": 1024
+      "maxDuration": 60
     }
   },
   "rewrites": [
@@ -14,7 +14,13 @@
     { "path": "/api/cron/intake", "schedule": "0 0 * * *" },
     { "path": "/api/cron/sweep", "schedule": "0 0 * * *" },
     { "path": "/api/cron/outreach", "schedule": "0 2 * * *" },
+    { "path": "/api/cron/outreach", "schedule": "0 8 * * *" },
+    { "path": "/api/cron/outreach", "schedule": "0 14 * * *" },
+    { "path": "/api/cron/outreach", "schedule": "0 20 * * *" },
     { "path": "/api/cron/revenue", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/social", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/social", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/social", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/social", "schedule": "0 18 * * *" },
+    { "path": "/api/cron/social", "schedule": "0 23 * * *" }
   ]
 }

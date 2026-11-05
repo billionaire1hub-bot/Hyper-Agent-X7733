@@ -12,7 +12,12 @@ import { OFFERINGS, getOffering, validateParams } from "./offerings.js";
 const STATE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const LOCK_TTL_SECONDS = 240;
 const FUNDED = 1;
-const OFFERING_IDS = new Set(OFFERINGS.map((offering) => offering.id));
+// The synthetic custom_task offering is not part of the 50-entry registry, but
+// a negotiated brief arrives as a real funded job, so intake must accept it.
+const OFFERING_IDS = new Set([
+  ...OFFERINGS.map((offering) => offering.id),
+  ...(config.custom.enabled ? ["custom_task"] : []),
+]);
 
 // Provider-read failures surface as these codes before any job record exists;
 // deferring them retries the still-FUNDED job on the next pass instead of
@@ -127,6 +132,26 @@ async function loadCursor() {
     return value >= 0n ? value : null;
   } catch {
     return null;
+  }
+}
+
+export async function ensureIntakeCursor(reason = "outreach") {
+  if (!config.intake.enabled) return { initialized: false, reason: "INTAKE_DISABLED" };
+  if (!walletConfigured) return { initialized: false, reason: "WALLET_NOT_CONFIGURED" };
+
+  const current = await loadCursor();
+  if (current !== null) return { initialized: false, cursor: String(current) };
+
+  const lockToken = await acquireLock(storeHelpers.intakeLock(), LOCK_TTL_SECONDS);
+  if (!lockToken) return { initialized: false, reason: "ANOTHER_INTAKE_ACTIVE" };
+  try {
+    const existing = await loadCursor();
+    if (existing !== null) return { initialized: false, cursor: String(existing) };
+    const counter = await getJobCounter();
+    await store.set(cursorKey(), String(counter));
+    return { initialized: true, cursor: String(counter), reasonSource: reason };
+  } finally {
+    await releaseLock(storeHelpers.intakeLock(), lockToken);
   }
 }
 

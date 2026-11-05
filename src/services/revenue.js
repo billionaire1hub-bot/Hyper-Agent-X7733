@@ -33,7 +33,7 @@ import { resolveToken } from "./tokens.js";
 import { computeIndicators, buildTradePlan } from "./ta.js";
 import { getAcpJobs, getJobCounter } from "./escrow.js";
 import { isPublicHttpUrl, discoverTargets } from "./discovery.js";
-import { sendA2APitch, registerOutreachSession } from "./outreach.js";
+import { registerOutreachSession, sendA2APitch } from "./outreach-session.js";
 import { processReferralPayouts, referralStatus } from "./referrals.js";
 import { basePriceFor, currentPricing } from "./pricing.js";
 

@@ -7,8 +7,10 @@ import {
   COMPETITOR_BENCHMARKS,
   COMPETITOR_BENCHMARK_SOURCE,
   COMPETITOR_UNDERCUT_BPS,
+  assessCustomTask,
   competitorCeilingUsdc,
   competitorPosition,
+  customPriceUsdc,
 } from "./offerings.js";
 
 const USDC_DECIMALS = 6;
@@ -44,6 +46,9 @@ const batchVolumeUsdc = (params) =>
     : 0;
 
 function listPriceFor(offering, params = {}) {
+  if (offering.custom) {
+    return customPriceUsdc(assessCustomTask(params.requirement).complexity);
+  }
   if (offering.id === "deep_analytics") {
     const depth = ANALYTICS_DEPTHS.includes(params.depth) ? params.depth : "standard";
     return depth === "enterprise" ? 15 : depth === "pro" ? 10 : 5;

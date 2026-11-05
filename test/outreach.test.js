@@ -108,6 +108,35 @@ test("scoring rewards relevant, active and contactable agents", () => {
   assert.ok(irrelevant.score < 30, `expected < 30, got ${irrelevant.score}`);
 });
 
+test("public directory agents expose their tasks and X contact channel", () => {
+  const agent = discovery.normalizeDirectoryAgent({
+    name: "Yield Router",
+    description: "Base yield automation",
+    walletAddress: ADDRESS,
+    twitterHandle: "@yieldrouter",
+    enabledChains: [{ id: 8453 }],
+    jobs: [{ name: "Yield scan", description: "Find Base yield", price: 0.02 }],
+  });
+  assert.equal(agent.twitter, "yieldrouter");
+  assert.equal(agent.tasks.length, 1);
+  assert.equal(agent.tasks[0].name, "Yield scan");
+  assert.deepEqual(agent.chainIds, [8453]);
+
+  const offering = getOffering("yield_alpha");
+  const pitch = outreach.buildMentionPitch({
+    target: agent,
+    analysis: { painPoint: "Needs live yield discovery" },
+    offering,
+    quoteUsdc: 0.005,
+    baseUrl: "https://hyper-agent-x7733.example.vercel.app",
+  });
+  assert.match(pitch, /^@yieldrouter /);
+  assert.match(pitch, /yield_alpha/);
+  assert.ok(pitch.length <= 280);
+  // A mentioned peer must be able to start negotiating, not only fund blind.
+  assert.match(pitch, /Negotiate: \/\/hyper-agent-x7733\.example\.vercel\.app\/a2a/);
+});
+
 test("outbound pitch menu only lists offerings executable from an empty envelope", () => {
   const ids = discovery.INTEL_OFFERINGS.map((offering) => offering.id);
   assert.ok(ids.length > 0);
@@ -292,4 +321,117 @@ test("inbound log records actions and counts", async () => {
   assert.ok(status.byAction.help >= 1);
   assert.ok(status.byAction.preview >= 1);
   assert.equal(status.recent[0].contextId, "inbox-2");
+});
+
+test("live ACP track record ranks settlement-proven agents above the bar", () => {
+  const provider = discovery.normalizeDirectoryAgent({
+    name: "Yield Router",
+    description: "Base yield automation and portfolio rebalancing",
+    walletAddress: ADDRESS,
+    twitterHandle: "@yieldrouter",
+    enabledChains: [{ id: 8453 }],
+    successfulJobCount: 59488,
+    totalJobCount: 68443,
+    successRate: 86.92,
+    uniqueBuyerCount: 405,
+    grossAgenticAmount: 262555.95,
+    lastActiveAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    role: "PROVIDER",
+  });
+  assert.equal(provider.completedJobs, 59488);
+  assert.equal(provider.uniqueBuyers, 405);
+  assert.equal(provider.volumeUsd, 262555.95);
+
+  const scored = discovery.scoreTarget(provider, { now: Date.now() });
+  assert.ok(scored.score >= 55, `expected >= 55, got ${scored.score} (${scored.reasons})`);
+  assert.ok(scored.reasons.includes("acp-settled:68443"));
+  assert.ok(scored.reasons.includes("acp-buyers:405"));
+  assert.ok(scored.reasons.includes("acp-volume:>=$1k"));
+  assert.ok(scored.reasons.includes("acp-active:<30d"));
+});
+
+test("dormant track record is discounted and thin records stay unqualified", () => {
+  const dormant = discovery.scoreTarget(
+    {
+      name: "Old Router",
+      description: "DeFi yield optimizer",
+      totalJobs: 5000,
+      successRate: 95,
+      uniqueBuyers: 900,
+      volumeUsd: 500000,
+      lastActiveAt: new Date(Date.now() - 400 * 86400000).toISOString(),
+      twitter: "oldrouter",
+    },
+    { now: Date.now() }
+  );
+  assert.ok(dormant.reasons.includes("acp-dormant:>180d"));
+
+  const thin = discovery.scoreTarget({
+    name: "Fresh Agent",
+    description: "mints collectible pictures",
+    completedJobs: 1,
+    successRate: 0.4,
+  });
+  assert.ok(thin.score < 55, `expected < 55, got ${thin.score}`);
+});
+
+test("directory resource URLs become channels only after the card answers", async () => {
+  const withCard = discovery.normalizeDirectoryAgent({
+    name: "Carded Agent",
+    description: "Base trading desk",
+    walletAddress: ADDRESS,
+    resources: [{ url: "https://carded.example.com" }],
+  });
+  assert.equal(withCard.url, "https://carded.example.com");
+  assert.deepEqual(withCard.resources, ["https://carded.example.com"]);
+
+  const junk = discovery.normalizeDirectoryAgent({
+    name: "Broken Agent",
+    description: "Base trading desk",
+    walletAddress: ADDRESS,
+    resources: [{ url: "not a url" }],
+  });
+  assert.equal(junk.url, null);
+});
+
+test("directory sweep pages are consecutive and wrap inside the configured range", () => {
+  assert.deepEqual(discovery.directoryPageRange({ start: 3, count: 2, max: 40 }), [3, 4]);
+  assert.deepEqual(discovery.directoryPageRange({ start: 39, count: 2, max: 40 }), [39, 40]);
+  assert.deepEqual(discovery.directoryPageRange({ start: 40, count: 3, max: 40 }), [40, 1, 2]);
+  assert.deepEqual(discovery.directoryPageRange({ start: 41, count: 1, max: 40 }), [40]);
+  assert.deepEqual(discovery.directoryPageRange({ start: 0, count: 2, max: 5, now: 0 }), [1, 2]);
+  assert.deepEqual(discovery.directoryPageRange({ count: 2, max: 12, now: 5 * 60 * 1000 }), [2, 3]);
+  assert.deepEqual(discovery.directoryPageRange({ start: 1, count: 99, max: 40 }).length, 4);
+  assert.deepEqual(discovery.directoryPageRange({ start: 1, count: 1, max: 9999 }), [1]);
+});
+
+test("the directory cursor persists so each cycle resumes where the last stopped", async () => {
+  const { config } = await import("../src/config.js");
+  const sweep = await import("../src/services/outreach-session.js");
+  const total = config.outreach.directoryMaxPages;
+
+  assert.equal(sweep.directorySweepPage(1, 40), 1);
+  assert.equal(sweep.directorySweepPage(40, 40), 40);
+  assert.equal(sweep.directorySweepPage(41, 40), 1);
+  assert.equal(sweep.directorySweepPage(0, 40), 1);
+  assert.equal(sweep.directorySweepPage("7", 40), 7);
+  assert.equal(sweep.directorySweepPage(442, 442), 442);
+  assert.equal(sweep.directorySweepPage(443, 442), 1);
+
+  const cold = await sweep.loadDirectorySweep();
+  assert.equal(cold.page, 1, "an empty store starts the sweep at page 1");
+  assert.equal(cold.maxPages, total, "the fallback bound is the configured sweep size");
+
+  assert.equal(await sweep.saveDirectorySweep({ page: 3 }), 3);
+  assert.equal((await sweep.loadDirectorySweep()).page, 3);
+
+  // the directory's own page count becomes the bound the cursor wraps at
+  assert.equal(await sweep.saveDirectorySweep({ page: 200, pageCount: 442 }), 200);
+  const warm = await sweep.loadDirectorySweep();
+  assert.equal(warm.page, 200);
+  assert.equal(warm.maxPages, 442);
+  assert.equal(warm.totalPages, 442);
+
+  assert.equal(await sweep.saveDirectorySweep({ page: 443 }), 1, "a finished sweep wraps instead of stopping");
+  assert.equal((await sweep.loadDirectorySweep()).page, 1);
 });

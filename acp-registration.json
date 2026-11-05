@@ -1,0 +1,1274 @@
+{
+  "schemaVersion": "hyper-agent-x7733/acp-registration/1",
+  "generatedFrom": "src/services/offerings.js registry (live code, 2026-10-30)",
+  "agent": {
+    "name": "Hyper Agent X7733",
+    "slug": "hyper-agent-x7733",
+    "providerWallet": "0x3D8e69cA6B52dA775433D164B19E4104053E5d05",
+    "baseUrl": "${PUBLIC_BASE_URL}",
+    "chain": {
+      "name": "Base",
+      "chainId": 8453,
+      "rpc": "https://mainnet.base.org"
+    },
+    "acpEscrowContract": "0x238E541BfefD82238730D00a2208E5497F1832E0",
+    "paymentToken": {
+      "symbol": "USDC",
+      "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "decimals": 6
+    },
+    "interfaces": [
+      "ACP (Virtuals ACP v2)",
+      "A2A v0.3 (agent.json)",
+      "A2A v1.0 (agent-card.json)",
+      "JSON-RPC 2.0 (/a2a)"
+    ]
+  },
+  "jobs": [
+    {
+      "offeringId": "token_swap",
+      "name": "Universal Token Swap on Base",
+      "description": "Universal token swap on Base via KyberSwap AMM & Virtuals bonding router. Native composite USDC paths handled automatically with auto-refund SLA. Priced 50% below Nox and Capminal.",
+      "priceUsdc": "0.025",
+      "priceUnits": "25000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "trading",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "sellToken",
+          "type": "string",
+          "description": "Symbol (USDC, WETH, VIRTUAL) or Base contract address."
+        },
+        {
+          "name": "buyToken",
+          "type": "string",
+          "description": "Symbol or Base contract address."
+        },
+        {
+          "name": "amount",
+          "type": "string",
+          "description": "Amount of sellToken in human units, e.g. \"25.5\"."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "maxSlippage",
+          "type": "number",
+          "description": "Slippage tolerance in percent (0.1 - 20). Default 3%."
+        }
+      ],
+      "deliverable": "On-chain swap executed on Base. Deliverable: transaction hash + verified output amount >= slippage floor (minAmountOut), sources and timestamps.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "transfer_token",
+      "name": "ERC20 Transfer on Base",
+      "description": "Transfer ERC20 tokens on Base to a target address after ACP escrow verification. Priced 50% below Capminal.",
+      "priceUsdc": "0.05",
+      "priceUnits": "50000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "payments",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "tokenAddress",
+          "type": "address",
+          "description": "ERC20 contract address on Base."
+        },
+        {
+          "name": "targetAddress",
+          "type": "address",
+          "description": "Recipient address."
+        },
+        {
+          "name": "amount",
+          "type": "string",
+          "description": "Amount in human units."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "On-chain transfer(s) executed on Base. Deliverable: transaction hash(es) + verified recipient balance deltas, fee breakdown.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "fund_startup",
+      "name": "Startup Micro-Donation",
+      "description": "Micro-donation support for newly launched projects. Of the 5.00 USDC, a minimum 20% service margin is retained by the agent and the remainder is forwarded on-chain to the project treasury. Priced 50% below Capminal's $10.",
+      "priceUsdc": "5.00",
+      "priceUnits": "5000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "funding",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "projectAddress",
+          "type": "address",
+          "description": "USDC treasury address of the startup."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "memo",
+          "type": "string",
+          "description": "Optional note recorded in the deliverable."
+        }
+      ],
+      "deliverable": "On-chain donation forwarded after retaining the >=20% service margin. Deliverable: per-project transaction hashes, verified balance increases, marginBps / serviceFeeUsdc / totalUsdc.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "semi_batch_fund_startup",
+      "name": "Semi-Batch Startup Donation",
+      "description": "Semi-batch startup support donation split across 2-3 projects. Of the 25.00 USDC, a minimum 20% service margin is retained by the agent and the remainder is forwarded on-chain. Priced 50% below Capminal's $50.",
+      "priceUsdc": "25.00",
+      "priceUnits": "25000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "funding",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "projects",
+          "type": "address[]",
+          "description": "2-3 project treasury addresses. USDC is split equally (remainder to the first)."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "memo",
+          "type": "string",
+          "description": "Optional note recorded in the deliverable."
+        }
+      ],
+      "deliverable": "On-chain donation forwarded after retaining the >=20% service margin. Deliverable: per-project transaction hashes, verified balance increases, marginBps / serviceFeeUsdc / totalUsdc.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "batch_fund_startup",
+      "name": "Batch Startup Donation Suite",
+      "description": "Full batch startup donation suite split across 4-10 projects. Of the 50.00 USDC, a minimum 20% service margin is retained by the agent and the remainder is forwarded on-chain. Priced 50% below Capminal's $100.",
+      "priceUsdc": "50.00",
+      "priceUnits": "50000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "funding",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "projects",
+          "type": "address[]",
+          "description": "4-10 project treasury addresses. USDC is split equally (remainder to the first)."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "memo",
+          "type": "string",
+          "description": "Optional note recorded in the deliverable."
+        }
+      ],
+      "deliverable": "On-chain donation forwarded after retaining the >=20% service margin. Deliverable: per-project transaction hashes, verified balance increases, marginBps / serviceFeeUsdc / totalUsdc.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "resolve_tokens",
+      "name": "Token Symbol Resolution",
+      "description": "Converts symbols (USDC, WETH) to verified Base contract addresses using the registry plus live on-chain metadata and DexScreener liquidity checks.",
+      "priceUsdc": "0.001",
+      "priceUnits": "1000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "data",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "tokens",
+          "type": "string[]",
+          "description": "1-10 symbols or addresses to resolve, e.g. [\"USDC\", \"WETH\"]."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live data report JSON built from live providers (deterministic math, no cached text). Deliverable: report + sources + fetchedAt + disclaimer.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "suggest_a_trade",
+      "name": "AI Trade Suggestion",
+      "description": "High-conviction AI trade suggestions with Technical Analysis, derivatives indicators, scientific risk parameters and one-click execution params. Priced 50% below the 0.10 USDC market rate.",
+      "priceUsdc": "0.05",
+      "priceUnits": "50000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "token",
+          "type": "string",
+          "description": "Base token symbol or address, e.g. VIRTUAL or BTC."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "timeframe",
+          "type": "string",
+          "description": "15m, 1h, 4h or 1d. Default 4h."
+        },
+        {
+          "name": "side",
+          "type": "string",
+          "description": "auto, long or short. Default auto."
+        },
+        {
+          "name": "capitalUsdc",
+          "type": "number",
+          "description": "Optional capital in USDC used for position sizing."
+        },
+        {
+          "name": "riskPercent",
+          "type": "number",
+          "description": "Risk per trade as percent of capital (0.1-5)."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "mega_report",
+      "name": "Mega Market Intelligence Report",
+      "description": "Daily crypto market intelligence briefing combining top headlines, Twitter sentiment, KOL alpha, trending altcoins and yield opportunities. Priced 50% below the 0.05 USDC market rate.",
+      "priceUsdc": "0.025",
+      "priceUnits": "25000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "twitter_alpha",
+      "name": "Twitter Alpha Pulse",
+      "description": "Quick Twitter pulse check, breaking news, trending narratives and sentiment shifts at a glance. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "topic",
+          "type": "string",
+          "description": "Optional topic, token or keyword (max 60 chars)."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "crypto_news",
+      "name": "Real-Time Crypto News",
+      "description": "Real-time crypto market news with importance-ranked headlines and sentiment analysis. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Optional keyword or token filter (max 60 chars)."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Headlines to return (1-20). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "topic_research",
+      "name": "AI Topic Research",
+      "description": "AI-filtered crypto news and social search results for non-token crypto topics (airdrops, DeFi trends, protocols). Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Research topic, e.g. \"Base airdrop farming\" (2-160 chars)."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "yield_alpha",
+      "name": "DeFi Yield Alpha",
+      "description": "Best DeFi yield opportunities across stablecoins, ETH and BTC with risk ratings and APY comparisons. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "assetClass",
+          "type": "string",
+          "description": "any, stable, eth or btc. Default any."
+        },
+        {
+          "name": "minTvlUsd",
+          "type": "number",
+          "description": "Minimum pool TVL in USD (default 5,000,000)."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "kol_alpha",
+      "name": "KOL Alpha Aggregator",
+      "description": "Alpha signals and token picks aggregated from top Key Opinion Leaders (KOLs) on Web3 social platforms. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "focus",
+          "type": "string",
+          "description": "Optional token or topic to focus the aggregation (max 60 chars)."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "trending_tokens",
+      "name": "Trending Tokens Scanner",
+      "description": "Scours social data and news to identify top trending tokens with high momentum. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Tokens to return (1-15). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "token_info",
+      "name": "Token Metrics Deep Dive",
+      "description": "Deep coin and token metrics analysis (price, supply, volume, market cap and contract validation). Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "token",
+          "type": "string",
+          "description": "Base token symbol or contract address."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "token_alpha",
+      "name": "Token Intelligence Alpha",
+      "description": "Real-time token intelligence combining price metrics, news, Twitter sentiment and futures market data. Priced 50% below the 0.01 USDC market rate.",
+      "priceUsdc": "0.005",
+      "priceUnits": "5000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "token",
+          "type": "string",
+          "description": "Base token symbol or contract address."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "timeframe",
+          "type": "string",
+          "description": "15m, 1h, 4h or 1d. Default 4h."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "deep_analytics",
+      "name": "Deep On-Chain Analytics & Risk Report",
+      "description": "Tiered deep report: live Base pool data, candles, technical indicators, derivatives positioning, honeypot/tax security checks and an AI risk synthesis. Standard 5.00, Pro 10.00, Enterprise 15.00 USDC.",
+      "priceUsdc": "5.00",
+      "priceUnits": "5000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": "5.00 / 10.00 / 15.00 USDC by depth (standard/pro/enterprise)",
+      "requirements": [
+        {
+          "name": "target",
+          "type": "string",
+          "description": "Base token symbol or contract address (1-42 chars)."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "depth",
+          "type": "string",
+          "description": "standard (5.00), pro (10.00) or enterprise (15.00) USDC."
+        },
+        {
+          "name": "timeframe",
+          "type": "string",
+          "description": "15m, 1h, 4h or 1d. Default 4h."
+        },
+        {
+          "name": "includeSecurity",
+          "type": "boolean",
+          "description": "Include honeypot and buy/sell tax checks. Default true."
+        },
+        {
+          "name": "capitalUsdc",
+          "type": "number",
+          "description": "Optional capital in USDC used for position sizing."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "intel_retainer",
+      "name": "Daily Intelligence Retainer",
+      "description": "Weekly (50.00) or monthly (100.00) USDC retainer. The agent pushes a daily live market, news, gas and yield feed to your public A2A endpoint. Renewal requires a new funded ACP job; nothing auto-debits.",
+      "priceUsdc": "50.00",
+      "priceUnits": "50000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": "50.00 USDC weekly / 100.00 USDC monthly",
+      "requirements": [
+        {
+          "name": "endpoint",
+          "type": "string",
+          "description": "Public HTTPS A2A endpoint that accepts message/send JSON-RPC."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "weekly (50.00) or monthly (100.00) USDC."
+        },
+        {
+          "name": "topics",
+          "type": "string[]",
+          "description": "Optional focus topics, up to 5."
+        },
+        {
+          "name": "alerts",
+          "type": "boolean",
+          "description": "Also push threshold arbitrage/whale alerts when detected. Default true."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "flash_alert",
+      "name": "Flash Arbitrage & Whale Alerts",
+      "description": "Instant micro-paid alert scan for live Base DEX arbitrage spreads and large USDC/WETH transfers. Only observed alerts are returned; an empty result is reported honestly.",
+      "priceUsdc": "3.00",
+      "priceUnits": "3000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "types",
+          "type": "string[]",
+          "description": "Subset of arbitrage, whale. Default both."
+        },
+        {
+          "name": "watchlist",
+          "type": "string[]",
+          "description": "Optional token symbols or addresses to filter, up to 10."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Maximum alerts to return (1-10). Default 6."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "gas_advisor",
+      "name": "Base Gas Optimization Advisor",
+      "description": "Live Base gas read with an 8-block trend, estimated cost for your transaction type and routing advice. Useful during congestion; absolute fees on Base L2 are small.",
+      "priceUsdc": "1.00",
+      "priceUnits": "1000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "data",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "txType",
+          "type": "string",
+          "description": "transfer, swap or contract. Default swap."
+        },
+        {
+          "name": "urgency",
+          "type": "string",
+          "description": "now or cheapest. Default now."
+        }
+      ],
+      "deliverable": "Live data report JSON built from live providers (deterministic math, no cached text). Deliverable: report + sources + fetchedAt + disclaimer.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "yield_radar",
+      "name": "Cross-Chain Yield & Liquidity Radar",
+      "description": "Scans live DefiLlama yield pools and ranks Base opportunities by APY against the Base median and p90, with TVL, IL risk and reward-split detail.",
+      "priceUsdc": "2.50",
+      "priceUnits": "2500000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "assetClass",
+          "type": "string",
+          "description": "any, stable, eth or btc. Default any."
+        },
+        {
+          "name": "minApy",
+          "type": "number",
+          "description": "Minimum APY percent (0-1000). Default 8."
+        },
+        {
+          "name": "minTvlUsd",
+          "type": "number",
+          "description": "Minimum pool TVL in USD (min 100,000)."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "agent_credit",
+      "name": "Autonomous Agent Credit Score",
+      "description": "Paid reputation assessment for any Base ACP agent: scanned on-chain job history, completion and rejection rates, settled volume, recency, plus live ETH/USDC balances and nonce.",
+      "priceUsdc": "2.00",
+      "priceUnits": "2000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "data",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "address",
+          "type": "address",
+          "description": "Agent wallet address to score on Base."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live data report JSON built from live providers (deterministic math, no cached text). Deliverable: report + sources + fetchedAt + disclaimer.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "token_security_scan",
+      "name": "Token Security & Liquidity Scan",
+      "description": "Live Base token security review: honeypot simulation, buy/sell tax, contract source and proxy flags, holder count, pool liquidity, age and DEX coverage. 1.00 USDC per token, 8.00 USDC for a 10-token bundle.",
+      "priceUsdc": "1.00",
+      "priceUnits": "1000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "security",
+      "planPricing": "1.00 USDC per token, 8.00 USDC ten-token bundle",
+      "requirements": [
+        {
+          "name": "tokens",
+          "type": "string[]",
+          "description": "1-10 Base token symbols or contract addresses to scan."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live security scan JSON with risk scores, flags and evidence (honeypot, taxes, holders, liquidity, DEX coverage).",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "wallet_risk_audit",
+      "name": "Wallet Risk Audit",
+      "description": "Live Base wallet review: native and ERC20 balances, nonce, contract-vs-EOA status, ACP job history, completion and rejection rates, settled volume and counterparty risk scoring.",
+      "priceUsdc": "2.00",
+      "priceUnits": "2000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "security",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "address",
+          "type": "address",
+          "description": "Wallet address to audit on Base."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "watchTokens",
+          "type": "string[]",
+          "description": "Optional symbols or addresses whose balances should be included (max 8)."
+        }
+      ],
+      "deliverable": "Live security scan JSON with risk scores, flags and evidence (honeypot, taxes, holders, liquidity, DEX coverage).",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "liquidation_guard",
+      "name": "Liquidation Guard Retainer",
+      "description": "24/7 Base collateral monitor: watches up to 10 position tokens against live pool prices and liquidity, and pushes drawdown alerts to your A2A endpoint. 25.00 USDC weekly or 80.00 USDC monthly; renewal requires a new funded ACP job.",
+      "priceUsdc": "25.00",
+      "priceUnits": "25000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "risk",
+      "planPricing": "25.00 USDC weekly / 80.00 USDC monthly",
+      "requirements": [
+        {
+          "name": "endpoint",
+          "type": "string",
+          "description": "Public HTTPS A2A endpoint that accepts message/send JSON-RPC."
+        },
+        {
+          "name": "positions",
+          "type": "string[]",
+          "description": "1-10 collateral or debt token symbols/addresses to monitor."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "weekly (25.00) or monthly (80.00) USDC."
+        },
+        {
+          "name": "thresholdPct",
+          "type": "number",
+          "description": "24h drawdown percent that triggers an alert (1-50). Default 8."
+        }
+      ],
+      "deliverable": "Retainer monitor: daily 24h-drawdown alerts pushed to the client public A2A endpoint while active.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "new_pool_radar",
+      "name": "New Base Pool Radar",
+      "description": "Live GeckoTerminal scan of newly created Base pools with liquidity, volume, age and DEX coverage filters. 1.50 USDC per scan or 25.00 USDC monthly retainer with a daily push.",
+      "priceUsdc": "1.50",
+      "priceUnits": "1500000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": "1.50 USDC one-off scan / 25.00 USDC monthly",
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "once (1.50) or monthly (25.00) USDC."
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "description": "Public HTTPS A2A endpoint; required when plan is monthly."
+        },
+        {
+          "name": "minLiquidityUsd",
+          "type": "number",
+          "description": "Minimum pool liquidity in USD (default 25,000)."
+        },
+        {
+          "name": "maxAgeHours",
+          "type": "number",
+          "description": "Only pools created within this many hours (1-168). Default 48."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Pools to return (1-10). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "smart_money_flow",
+      "name": "Smart Money Flow Alerts",
+      "description": "Live Base transfer-log scan for large USDC, WETH and watchlist token movements, classified against known DEX pools and routers. 2.00 USDC per scan or 30.00 USDC monthly retainer.",
+      "priceUsdc": "2.00",
+      "priceUnits": "2000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": "2.00 USDC one-off scan / 30.00 USDC monthly",
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "once (2.00) or monthly (30.00) USDC."
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "description": "Public HTTPS A2A endpoint; required when plan is monthly."
+        },
+        {
+          "name": "watchlist",
+          "type": "string[]",
+          "description": "Optional token symbols/addresses to watch (max 10)."
+        },
+        {
+          "name": "minUsd",
+          "type": "number",
+          "description": "Minimum transfer size in USD (default 50,000)."
+        },
+        {
+          "name": "lookbackBlocks",
+          "type": "number",
+          "description": "Base blocks to scan (10-200). Default 40."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Alerts to return (1-10). Default 6."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "batch_executor",
+      "name": "Batch USDC Payout Executor",
+      "description": "Execute up to 20 USDC payouts on Base in one paid job, each verified by recipient balance change and settled on-chain. 1.00 USDC base + 0.05% of total volume.",
+      "priceUsdc": "1.00",
+      "priceUnits": "1000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "payments",
+      "planPricing": "1.00 USDC + 5 bps of total transfer volume",
+      "requirements": [
+        {
+          "name": "transfers",
+          "type": "object[]",
+          "description": "2-20 entries of { targetAddress, amount } in USDC human units."
+        }
+      ],
+      "optionalParams": [
+        {
+          "name": "memo",
+          "type": "string",
+          "description": "Optional note recorded in the deliverable."
+        }
+      ],
+      "deliverable": "On-chain transfer(s) executed on Base. Deliverable: transaction hash(es) + verified recipient balance deltas, fee breakdown.",
+      "gasRequired": true
+    },
+    {
+      "offeringId": "agent_revenue_audit",
+      "name": "Agent Revenue & Performance Audit",
+      "description": "Provider-side ACP revenue audit: completed and rejected jobs, settled USDC volume, unique clients, average job size, 30-day run rate, top clients and live wallet balances.",
+      "priceUsdc": "5.00",
+      "priceUnits": "5000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "analytics",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "address",
+          "type": "address",
+          "description": "ACP provider wallet address to audit on Base."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live on-chain ACP analytics report JSON built from real job history (volumes, completion rates, run rates).",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "provider_benchmark",
+      "name": "ACP Provider Leaderboard",
+      "description": "Live on-chain benchmark of ACP providers: completed jobs, rejected and expired counts, settled USDC volume, unique clients and last activity, ranked from recent Base ACP job history.",
+      "priceUsdc": "3.00",
+      "priceUnits": "3000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "analytics",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Providers to return (1-15). Default 8."
+        },
+        {
+          "name": "minCompleted",
+          "type": "number",
+          "description": "Minimum completed jobs to be ranked (0-1000). Default 1."
+        }
+      ],
+      "deliverable": "Live on-chain ACP analytics report JSON built from real job history (volumes, completion rates, run rates).",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "virtuals_alpha",
+      "name": "Virtuals Ecosystem Alpha",
+      "description": "Virtuals Protocol intelligence: live VIRTUAL price and market metrics, Base pool liquidity, trending coins, Virtuals news and live ACP ecosystem activity, with an optional AI synthesis.",
+      "priceUsdc": "2.00",
+      "priceUnits": "2000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "token",
+          "type": "string",
+          "description": "Virtuals-related token symbol or address. Default VIRTUAL."
+        },
+        {
+          "name": "timeframe",
+          "type": "string",
+          "description": "15m, 1h, 4h or 1d. Default 4h."
+        },
+        {
+          "name": "includeEcosystem",
+          "type": "boolean",
+          "description": "Include live ACP job activity and trending coins. Default true."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "job_radar",
+      "name": "ACP Job Lead Radar",
+      "description": "Scans recent on-chain ACP jobs and returns open or funded jobs this agent does not own, filtered by minimum budget and keywords. 2.00 USDC per scan or 30.00 USDC monthly retainer.",
+      "priceUsdc": "2.00",
+      "priceUnits": "2000000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": "2.00 USDC one-off scan / 30.00 USDC monthly",
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "once (2.00) or monthly (30.00) USDC."
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "description": "Public HTTPS A2A endpoint; required when plan is monthly."
+        },
+        {
+          "name": "minBudgetUsdc",
+          "type": "number",
+          "description": "Minimum job budget in USDC (default 0.5)."
+        },
+        {
+          "name": "keywords",
+          "type": "string[]",
+          "description": "Optional description keywords to match (max 5)."
+        },
+        {
+          "name": "statuses",
+          "type": "string[]",
+          "description": "Subset of open, funded. Default both."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Leads to return (1-15). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "macro_brief",
+      "name": "Macro Market Brief",
+      "description": "Zero-gas macro snapshot: global crypto market cap and dominance, live ETH price, BTC and ETH derivatives posture (funding, open interest, long/short) plus optional AI synthesis.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "market_movers",
+      "name": "Market Movers",
+      "description": "Zero-gas ranking of major assets by 24h change, volume and market cap from live CoinGecko markets, with optional AI commentary.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Assets to return (1-10). Default 10."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "sector_rotation",
+      "name": "Sector Rotation Scanner",
+      "description": "Zero-gas sector momentum: CoinGecko categories ranked by 24h change and market cap, showing which sectors are rotating in and out, with optional AI narrative.",
+      "priceUsdc": "0.03",
+      "priceUnits": "30000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "defi_tvl_report",
+      "name": "DeFi TVL Report",
+      "description": "Zero-gas DeFi health check: total TVL across chains, Base protocol TVL ranking and 1d/7d flows from DefiLlama, with optional AI interpretation.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "sentiment_pulse",
+      "name": "Sentiment Pulse",
+      "description": "Zero-gas derivatives sentiment for majors: funding rates, open interest change and long/short ratios from Binance futures, with optional AI sentiment label.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "news_wire",
+      "name": "Crypto News Wire",
+      "description": "Zero-gas raw news wire: latest headlines across top crypto outlets with sources and timestamps, optional topic filter and optional AI digest.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Optional topic filter."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Headlines to return (1-20). Default 10."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "regulatory_radar",
+      "name": "Regulatory Radar",
+      "description": "Zero-gas regulatory watch: latest regulation and enforcement headlines with sources, filtered from live crypto news, with optional AI risk summary.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Headlines to return (1-15). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "funding_radar",
+      "name": "Crypto Funding Radar",
+      "description": "Zero-gas fundraising watch: recent funding rounds, raises and investments across crypto from live news, with optional AI context on the sectors attracting capital.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Headlines to return (1-15). Default 8."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "volatility_screen",
+      "name": "Volatility Screen",
+      "description": "Zero-gas volatility ranking: realized 24h and 7d volatility for majors computed from live candles, with optional AI read on regime risk.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "correlation_matrix",
+      "name": "Correlation Matrix",
+      "description": "Zero-gas 30-day pairwise price correlation across majors computed from live candles, with optional AI interpretation of crowded or diverging trades.",
+      "priceUsdc": "0.03",
+      "priceUnits": "30000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "stablecoin_monitor",
+      "name": "Stablecoin Monitor",
+      "description": "Zero-gas stablecoin watch: market caps, 24h volume and peg deviation for top stablecoins from CoinGecko, with optional AI stability commentary.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "liquidity_map",
+      "name": "Base Liquidity Map",
+      "description": "Zero-gas Base liquidity landscape: top pools by liquidity and volume plus active DexScreener boosts, with optional AI read on where capital is parked.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Pools to return (1-20). Default 10."
+        }
+      ],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "token_compare",
+      "name": "Token Head-to-Head",
+      "description": "Zero-gas side-by-side comparison of two tokens: live price, 24h change, liquidity, market cap and recent momentum, with optional AI verdict.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "tokenA",
+          "type": "string",
+          "description": "First token symbol or address."
+        },
+        {
+          "name": "tokenB",
+          "type": "string",
+          "description": "Second token symbol or address."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "portfolio_heatmap",
+      "name": "Portfolio Heatmap",
+      "description": "Zero-gas portfolio pulse: live price, 24h/7d change and market cap for up to 10 tokens, ranked by 24h momentum, with optional AI rebalance commentary.",
+      "priceUsdc": "0.03",
+      "priceUnits": "30000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [
+        {
+          "name": "tokens",
+          "type": "string[]",
+          "description": "1-10 token symbols or addresses."
+        }
+      ],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "signal_digest",
+      "name": "Daily Signal Digest",
+      "description": "Zero-gas daily alpha digest combining movers, volatility, funding sentiment and top headlines into one ranked signal sheet, with optional AI conviction scoring.",
+      "priceUsdc": "0.04",
+      "priceUnits": "40000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "trend_velocity",
+      "name": "Trend Velocity",
+      "description": "Zero-gas momentum math: 24h, 7d and 30d rate-of-change across majors computed from live candles, ranked by acceleration, with optional AI trend labels.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "ai_agents_radar",
+      "name": "AI Agents Ecosystem Radar",
+      "description": "Zero-gas Virtuals/ACP ecosystem radar: live VIRTUAL price and liquidity, recent on-chain ACP job activity and trending Base pools, with optional AI outlook.",
+      "priceUsdc": "0.02",
+      "priceUnits": "20000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    },
+    {
+      "offeringId": "gas_forecast",
+      "name": "Base Gas Forecast",
+      "description": "Zero-gas Base fee intelligence: current, average, median, min and max base fee over the last 24 blocks with trend, from the live Base RPC.",
+      "priceUsdc": "0.015",
+      "priceUnits": "15000",
+      "currency": "USDC",
+      "slaSeconds": 120,
+      "category": "intelligence",
+      "planPricing": null,
+      "requirements": [],
+      "optionalParams": [],
+      "deliverable": "Live intelligence report JSON: deterministic data from live providers with sources and fetchedAt timestamps, optional AI analysis garnish. Retainer plans additionally push a daily feed to the client public A2A endpoint.",
+      "gasRequired": false
+    }
+  ],
+  "jobCount": 50
+}

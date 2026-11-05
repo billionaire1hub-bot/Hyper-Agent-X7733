@@ -9,9 +9,10 @@ Production Express backend for a high-frequency Base utility agent that is paid 
 - **Live data:** CoinGecko, GeckoTerminal, DexScreener, Binance USD-M futures, Coinbase Exchange, DefiLlama Yields, honeypot.is, public RSS feeds, Gemini Google Search grounding, optional X/Twitter API v2
 - **Autonomous execution:** on-chain ACP job intake poller (funded jobs are discovered and executed without an inbound HTTP call; see below)
 - **Agent-to-agent:** A2A agent cards + JSON-RPC 2.0 endpoint at `/a2a`, session-aware inbound reply routing, and a 50-entry inbox log
-- **Proactive outreach:** discovery, targeting and priced pitching engine, on by default (`OUTREACH_ENABLED=true`); it self-guards and sends nothing until `PUBLIC_BASE_URL` is set (see below)
-- **Autonomous publishing:** optional idle-time X thread generator (off by default; see below)
-- **Runtime:** Node.js 20+, ESM, deployed as a Vercel serverless function (`api/index.js`)
+- **Proactive outreach:** discovery, task review, priced pitching and negotiation, on by default; saving the Virtuals chat URL wakes it on the first inbound request and inbound traffic keeps it awake between cron slots
+- **Beyond the catalogue:** a synthetic `custom_task` order id — when none of the 50 registered offerings fits, the agent asks the peer for its exact brief, prices it from that text, and routes it to Groq (fast generation) or Gemini (deep reasoning / live grounding)
+- **Autonomous publishing:** idle-time X thread generator, on by default when AI and user-context X credentials are present (`SOCIAL_AUTOPOST=false` pauses it)
+- **Runtime:** Node.js 24.x, ESM, deployed as a Vercel serverless function (`api/index.js`)
 
 ## Offerings
 
@@ -70,7 +71,7 @@ Production Express backend for a high-frequency Base utility agent that is paid 
 
 Each offering is published by `GET /api/offerings` with its parameter schema, price in base units, SLA, and payment token. The ten original intelligence offerings are priced 50% below comparable market rates and never return cached sample text: every report is synthesized at execution time from live provider data, with `sources` and `fetchedAt` timestamps. The sixteen revenue and risk offerings are described in [Revenue suite](#revenue-suite); their effective price can be lowered only through a server-issued quote (happy hour or performance model) and is re-checked against escrow at execution. The eighteen zero-gas insight offerings are described in [Zero-gas insight suite](#zero-gas-insight-suite-18-offerings): deterministic live data first, an optional AI garnish second, and no wallet balance required.
 
-All 50 offerings share one execution path: `validateParams` normalizes the request, `basePriceFor`/`priceUnitsFor` set the minimum escrow budget, `verifyEscrow` re-reads the funded job, `runOffering` dispatches to the live handler, and `settle` submits the deliverable hash to ACP. One-off scans execute immediately, while `liquidation_guard`, monthly `new_pool_radar` / `smart_money_flow` / `job_radar` and `intel_retainer` activate a stored subscription whose daily push is built by the same scanners.
+All 50 offerings share one execution path: `validateParams` normalizes the request, `basePriceFor`/`priceUnitsFor` set the minimum escrow budget, `verifyEscrow` re-reads the funded job, `runOffering` dispatches to the live handler, and `settle` submits the deliverable hash to ACP. One-off scans execute immediately, while `liquidation_guard`, monthly `new_pool_radar` / `smart_money_flow` / `job_radar` and `intel_retainer` activate a stored subscription whose daily push is built by the same scanners. The negotiated `custom_task` brief runs through that same path as a synthetic offering (see below), so no registry entry, price or route changes for the 50 published offerings.
 
 ### Competitive 50% undercut
 
@@ -177,7 +178,7 @@ The agent publishes standard A2A discovery documents and answers JSON-RPC 2.0 re
 | `GET /a2a` | Short description of the endpoint and supported methods |
 | `POST /a2a` | JSON-RPC 2.0 (`message/send`, `SendMessage`, `tasks/get`, `GetTask`) |
 
-Each card lists all 50 offerings as skills with price, SLA, and parameter schema, plus a `https://virtuals.io/acp` extension advertising the Base chain id, escrow contract, payment token, and the on-chain discovery method.
+Each card lists all 50 offerings as skills with price, SLA, and parameter schema, plus a `https://virtuals.io/acp` extension advertising the Base chain id, escrow contract, payment token, the on-chain discovery method, and the `customTask` contract for work outside the catalogue (custom work is extension metadata, never a 51st skill).
 
 **Methods.**
 
@@ -193,17 +194,23 @@ Set `A2A_ENABLED=false` to turn the endpoint off (cards return a JSON-RPC error)
 
 ## Proactive discovery & outreach
 
-The agent can find other Base agents, score them for fit, pitch a priced intelligence job with a live micro-alpha teaser, and negotiate until the counterparty funds an ACP job. **Outreach is on by default (`OUTREACH_ENABLED=true`)** so the agent hunts for clients from day one. Because outbound messages are public, addressed to third parties, and cannot be un-sent, the loop additionally self-guards: it stays idle until `PUBLIC_BASE_URL` is configured (the deployed URL that pitches and A2A replies point back to), and every send still respects the caps below. Set `OUTREACH_ENABLED=false` to opt out entirely.
+The agent can find other Base agents, review their published tasks, score them for fit, pitch a priced intelligence job with a live micro-alpha teaser, and negotiate until the counterparty funds an ACP job. **Outreach is on by default (`OUTREACH_ENABLED=true`)**. It starts when `PUBLIC_BASE_URL` is configured or when the first inbound request arrives on the trusted Vercel deployment host. Saving/updating the chat URL on Virtuals therefore activates discovery as soon as the platform calls the agent; there is no platform webhook to observe a dashboard save before that first call. Set `OUTREACH_ENABLED=false` to opt out entirely.
 
-**Discovery** (`src/services/discovery.js`). Three real sources, queried every cycle:
+**The cycle keeps itself awake.** The activation wake is a one-shot, and a Hobby deployment only gets four outreach cron slots a day, so an idle deployment would otherwise stall between slots. Every non-cron inbound request (protocol probe, agent-card fetch, peer reply, buyer chat) now re-arms exactly one follow-up wake per `OUTREACH_INTERVAL_SECONDS` through `maybeWakeOutreach` in `src/services/activation.js`: a store marker (`outreach:kick`, `onlyIfAbsent`, TTL = the interval) guarantees one wake per interval, the wake never passes `force=1`, and it is skipped entirely when the cycle is not due or the day's pitch budget is spent. The cron route never re-arms itself, so a wake cannot cascade. Both paths require `CRON_SECRET` (the routes fail closed without it) and continuation wakes need at least some inbound traffic — the platform cron slots still cover a fully idle deployment.
+
+**Discovery** (`src/services/discovery.js`). Five real sources, queried every cycle:
 
 1. **On-chain ACP activity** — recent job ids, their client/provider addresses, budgets and timestamps. Agents already paying for work are the best prospects.
-2. **Virtuals directory** — `OUTREACH_INDEX_URL` (default `https://api.acp.virtuals.io/agents`) when an `OUTREACH_INDEX_TOKEN` or `ACP_API_KEY` is configured. The public endpoint returns `401` without a token and has no published schema, so the normalizer accepts common envelopes (`agents`, `data`, `items`, `results`) and is bypassed cleanly when unauthenticated.
-3. **`OUTREACH_TARGETS` allowlist** — comma-separated agent cards or base URLs for known counterparties.
+2. **Public Virtuals directory, swept continuously** — `OUTREACH_DIRECTORY_URL` (default `https://acpx.virtuals.io/api/agents`), keyless. Each record includes the agent's offerings/jobs, category, enabled chains, success rate and X handle. The directory currently reports **44,110 agents over 442 pages of 100**. One cycle reads `OUTREACH_DIRECTORY_PAGES` (default 4) consecutive pages of `OUTREACH_DIRECTORY_LIMIT` (default 100, the provider maximum) — **400 directory agents per cycle** — fetched in parallel, and the next start page is persisted in the shared store (`outreach:directory:sweep`) together with the page count the directory reported. The cursor wraps at that reported count, so a full sweep of the network takes ~111 cycles (≈19 hours at the 10-minute cadence on Pro, or ~28 days across four daily Hobby slots) and then begins again — never pinned to one page or a static subset. `OUTREACH_DIRECTORY_MAX_PAGES` (default 900) is only the fallback bound before the first successful page, and if nothing is stored yet the first cycle starts from a time-derived page so concurrent deployments do not all read page 1. The request retries twice because this endpoint intermittently returns 5xx or stalls, and a page that still fails is reported while the remaining pages continue.
+3. **Public ACP registry** — `OUTREACH_REGISTRY_URL/wallet/<address>` enriches anonymous on-chain participants with their live profile and published tasks.
+4. **Optional authenticated index** — `OUTREACH_INDEX_URL` when an `OUTREACH_INDEX_TOKEN` or `ACP_API_KEY` is configured. Auth failures are reported and do not stop the public sources.
+5. **`OUTREACH_TARGETS` allowlist** — comma-separated agent cards or base URLs for known counterparties.
 
-On-chain addresses carry no A2A endpoint of their own, so they are analyzed and ranked but only become pitchable when the same address also appears in the directory or allowlist with a URL. The engine never guesses an endpoint from an address.
+Candidates with a public A2A card are contacted by JSON-RPC. Directory agents without an A2A endpoint but with a published X handle can receive a concise X mention (`OUTREACH_X_PITCH=true`, default); set it to `false` for A2A-only outreach. The engine never guesses an endpoint from a wallet address. The X mention ends with `Negotiate: //<public-host>/a2a` so a mentioned peer has a reachable place to haggle, ask for a custom brief or read the agent card instead of only being able to fund blind.
 
-A2A cards are fetched only from public HTTPS origins: loopback, private, link-local and IPv6 literals are rejected, as are URLs with embedded credentials (SSRF guard). Each candidate is scored deterministically 0–100: domain keywords (yield/trading/portfolio/analysis), overlap with the pitchable intelligence offerings, on-chain job count and budget, recency and a reachable endpoint. Candidates below `OUTREACH_MIN_SCORE` are skipped, and only `contactable` targets with an A2A endpoint can be pitched.
+A2A cards are fetched only from public HTTPS origins: loopback, private, link-local and IPv6 literals are rejected, as are URLs with embedded credentials (SSRF guard). Each candidate is scored deterministically 0–100: domain keywords, overlap with the pitchable intelligence offerings, published-task overlap, on-chain activity, the agent's **own ACP track record published by the directory** (settled jobs, success rate, unique buyers, gross volume and recency — capped at 25 points, with a discount for agents dormant over 180 days) and available contact channels. Candidates below `OUTREACH_MIN_SCORE` or without an A2A/X channel are skipped.
+
+A directory `resources` URL becomes a pitch channel only after its agent card answers; until then the only unverified endpoint trusted is one you list in `OUTREACH_TARGETS`. In practice the first live pitch therefore needs at least one reachable channel: `OUTREACH_TARGETS` (operator-supplied A2A endpoints), `ACP_API_KEY` / `OUTREACH_INDEX_TOKEN` for the authenticated ACP index, or the X keys that enable mention pitching.
 
 The outbound menu is limited to offerings that validate with an empty parameter envelope. A pitch always carries `{"offeringId":"…","params":{}}`, so offerings that need a token, topic, address or retainer endpoint stay inbound-only; pitching them would produce a funded job the intake poller has to reject. The menu currently holds 28 offerings — `mega_report`, `twitter_alpha`, `crypto_news`, `yield_alpha`, `kol_alpha`, `trending_tokens`, `flash_alert`, `yield_radar`, `new_pool_radar`, `smart_money_flow`, `virtuals_alpha`, `job_radar` plus sixteen of the eighteen zero-gas insight offerings (`token_compare` and `portfolio_heatmap` require tokens and stay inbound-only).
 
@@ -222,12 +229,27 @@ The outbound menu is limited to offerings that validate with an empty parameter 
 
 **Operating it:**
 
-- `GET /api/outreach` (API-key protected) — enabled state, caps, pitches today, last attempt/error and opt-out count.
+- `GET /api/outreach` (API-key protected) — activation, public URL source, channels, discovery sources, caps, pitches today, sessions and last error.
+- `POST /api/outreach/start` (API-key protected) — immediately run one cycle without waiting for cron.
 - `GET /api/cron/outreach` — one cycle (requires `CRON_SECRET`; `?force=1` bypasses the interval throttle, not the daily cap, cooldown or opt-outs).
-- Long-running hosts (`npm start`) run an unref'd interval loop; Vercel drives it through the cron entry.
-- All outbound traffic uses JSON-RPC `message/send` with `metadata.sessionId`; no other network calls are made to targets.
+- Long-running hosts (`npm start`) run an unref'd interval loop; Vercel uses four daily cron slots plus the chat-URL activation wake-up.
+- A2A pitches use JSON-RPC `message/send` with `metadata.sessionId`; X pitches are public mentions through the configured user-context X account.
 
 Outreach failures are contained: a cycle catches everything, records `lastError`, and never throws into Express or the ACP pipeline. Discovery source errors are reported in the cycle result, not fatal.
+
+**Funding of a negotiated custom brief is verified the same way**, with one extra rule: the job description must carry the exact brief that was quoted, because the tier price — and therefore the escrow minimum — is recomputed from that text. `src/services/outreach.js:orderMatchesSession` compares the normalized requirement, so a job funded against a different brief is refused with `funded_unverified` instead of executed.
+
+## Custom work beyond the 50 offerings (`custom_task`)
+
+A peer that fits none of the registered offerings is not skipped. `runOutreachCycle` opens a **custom session** for it (`customAskSession`), sends the ask over A2A, and counts it against the same daily cap, cooldown and opt-out rules as a pitch. The peer's reply becomes the brief: `evaluateNegotiation` returns `need_brief` until the message is long enough to price, then `requirement`, which fixes the session's price, floor and a fresh five-minute window. Inbound traffic gets the same treatment without a session — `customInboundReply` quotes an unmapped statement and answers an unmapped question with the ask, in `POST /a2a` and `POST /api/chat`.
+
+`custom_task` is a **synthetic offering**: `getOffering("custom_task")` resolves it and the pipeline executes it, but it is never added to `OFFERINGS`, `GET /api/offerings`, the agent-card skills or the pitch menu, so the registry stays exactly 50 and every existing offering keeps its current preview and execution path.
+
+**Pricing and routing are deterministic, never model-chosen.** `assessCustomTask` (`src/services/offerings.js`) reads the requirement text and produces complexity 1–5 (`CUSTOM_TASK_MIN_CHARS`/`MAX_CHARS`, signal weights, length) and a tier price — `CUSTOM_TASK_BASE_PRICE_USDC` × 1/1.5/2/2.5/3, capped at `CUSTOM_TASK_MAX_PRICE_USDC`. Signals pick the engine: `live_facts` and `onchain_context`/`deep_reasoning` wording (or complexity ≥ `CUSTOM_TASK_DEEP_THRESHOLD`) put **Gemini** first — it is also the only engine asked for Google Search grounding — while `structured_output`, `bulk_items` and plain generation put **Groq** first for speed. Because both numbers come from the requirement alone, `verifyEscrow` recomputes the identical `priceUnitsFor` amount from the job description.
+
+**Execution** (`src/services/custom.js:executeCustomTask`) is zero-gas. Gemini-grounded briefs fetch live facts first, live-context briefs pull CoinGecko global/trending and RSS headlines in parallel (failing providers are listed, never faked), and the brief plus that evidence goes to the preferred engine through `askJSON`/`askText`, which still fail over to the other engine. If neither answers, the job throws `CUSTOM_AI_UNAVAILABLE`: the pipeline refunds the escrow rather than delivering invented work. Deliverables carry the routing report (`preferred`, `answeredBy`, `fellBack`, signals, reasons), grounding citations, live data and latency.
+
+**Toggling it off:** `CUSTOM_TASK_ENABLED=false` removes the ask from the outreach cycle, makes `getOffering("custom_task")` 404, and drops the inbound quote path — the 50 registered offerings are unaffected.
 
 ## Revenue suite
 
@@ -274,7 +296,7 @@ Ten revenue mechanics sit on top of the existing ACP escrow, extended by ten v1.
 
 ## Autonomous X publishing
 
-When enabled, the agent writes and publishes its own crypto intelligence threads during idle time. It is **off by default** because posting is public and hard to reverse.
+The agent writes and publishes its own crypto intelligence threads during idle time. **Autoposting is on by default**; set `SOCIAL_AUTOPOST=false` to pause it. A cycle still does nothing unless AI and user-context X credentials are configured, the agent is idle, the interval is due and the daily cap has room.
 
 **How a cycle runs** (`src/services/social.js` → `src/services/articles.js`):
 
@@ -284,13 +306,13 @@ When enabled, the agent writes and publishes its own crypto intelligence threads
 4. **Synthesis and validation.** Gemini writes the thread (Groq is the JSON fallback). Every number in the draft must appear in the live research payload (0.5% rounding tolerance); invented numbers, handles or links fail validation and the draft is regenerated once with feedback, then discarded. A deterministic "Market snapshot" tweet with real metrics is inserted between the hook and the analysis.
 5. **Publishing.** The thread is posted as a reply chain via the X API v2. Rate limits and network failures are logged and recorded in state; a partial thread keeps the tweets that were published. Posting is never retried automatically, so a timeout cannot duplicate a tweet.
 
-**Credentials.** Publishing needs a user context; the app-only `TWITTER_BEARER_TOKEN` used for reading cannot post. Either OAuth 1.0a (`X_CONSUMER_KEY`, `X_CONSUMER_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET`) or an OAuth 2.0 user access token (`X_USER_ACCESS_TOKEN`, e.g. issued through a Virtuals X OAuth connection) enables it. The OAuth 1.0a header is signed locally with HMAC-SHA1.
+**Credentials.** Publishing needs a user context; the app-only `TWITTER_BEARER_TOKEN` used for reading cannot post. Either OAuth 1.0a (`X_CONSUMER_KEY`, `X_CONSUMER_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET`) or an OAuth 2.0 user access token (`X_USER_ACCESS_TOKEN`, e.g. issued through a Virtuals X OAuth connection) enables it. The Vercel aliases `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET`/`TWITTER_ACCESS_SECRET` and `TWITTER_USER_ACCESS_TOKEN` are accepted too. The OAuth 1.0a header is signed locally with HMAC-SHA1. `GET /api/social` reports each missing credential slot without printing any secret.
 
 **Operating it:**
 
 - `GET /api/social` — schedule, last post, next run, recent results. `?verify=1` also calls `GET /users/me` to confirm the posting account.
 - `GET /api/cron/social` — runs one cycle when due (requires `CRON_SECRET`; `?force=1` bypasses the interval and daily cap, not the idle gate).
-- Long-running hosts (`npm start`) run an unref'd interval loop; Vercel drives the cycle through the cron entry instead.
+- Long-running hosts (`npm start`) run an unref'd interval loop; Vercel drives the cycle through four daily cron slots.
 - `npm run social:preview` generates a real thread from live data and prints it without posting.
 
 Social failures are contained: the loop catches everything, records `lastError`, and never throws into Express or the ACP pipeline. A publishing backlog simply retries on the next tick.
@@ -315,6 +337,7 @@ All responses are JSON with CORS `Access-Control-Allow-Origin: *`. Unhandled err
 | GET | `/api/health` | RPC, ACP escrow, USDC balance, KyberSwap, Virtuals router, wallet, AI engines, intelligence data providers (CoinGecko/GeckoTerminal/Binance/DefiLlama), job intake, A2A, outreach, inbound inbox, store durability, and per-offering readiness. Always HTTP 200; `ready` reflects production readiness. |
 | GET | `/api/offerings` | Published offerings and schemas |
 | GET | `/api/offerings/:id` | One offering |
+| GET | `/api/custom` | `custom_task` contract: tier prices, brief length limits, Groq/Gemini routing rule and the exact order envelope |
 | GET | `/api/pricing` | Live tier table, happy-hour window, Base gas, referral terms |
 | POST | `/api/quote` | Issue a stored, bound quote (happy hour / performance) and return the ACP description (API key) |
 | GET | `/api/revenue` | Revenue cycle state, pricing, subscriptions, referral queue (API key) |
@@ -392,6 +415,25 @@ The response contains the parsed intent, an engine tag (`rules`, `groq`, `gemini
 
 Groq is the primary intent engine with Gemini as fallback. When neither key is configured, a deterministic rule parser handles the documented patterns and everything else returns help text. The model receives the user message as untrusted JSON data and can only produce offering IDs from the published list. Deterministic routing covers news, trends, sentiment, research, yields, token metrics, KOL and trade-analysis phrasing, so those requests work even without an AI key at parse time.
 
+### Chat, boss passcode and admin commands
+
+`POST /api/chat` has four response shapes, decided in this order:
+
+| Response | When | What it does |
+| --- | --- | --- |
+| `preview` / `completed` | The message matches one of the 50 ACP offerings | Unchanged paid flow: preview first, execution only with a funded `jobId`. |
+| `boss_verified` / `boss_discovery` / `boss_status` | The message contains the boss passcode | Admin path, outside the escrow flow. |
+| `chat` | Nothing matched and no passcode was given | A normal conversational answer from Groq, with Gemini as fallback, plus a compact `capabilities` summary instead of the 50-item list. |
+| `admin_required` | An admin command was requested without the passcode | The reply tells the operator to enter the secret passcode first. |
+
+**Who may call it.** When `API_KEY` is set, `POST /api/chat` requires it — so a buyer or peer agent that cannot send a header never reaches this route. The key-free public surface is `POST /a2a` (and `GET /.well-known/agent-card.json`), which runs the same intent engine, the same session negotiation and the same `custom_task` quoting, and is preview-only until escrow verifies a funded job. Point the Virtuals chat URL at `/a2a`, or send the key with the request if the platform lets you configure a header.
+
+**Boss passcode.** `BOSS_PASSCODE` (default `03210388`) is checked against the whole message with a constant-time comparison; it is never echoed back in a reply, a log line or an error. A verified message returns the boss acknowledgement and asks which task to initiate on Virtuals Protocol. The verification is remembered per operator for `BOSS_SESSION_TTL_SECONDS` (default 1800) so the next command does not need the code again; ordinary offering requests are never affected by that session.
+
+**Outbound agent discovery.** `03210388 start outbound agent discovery` (or any equivalent phrasing) runs the outreach cycle directly with `reason: "boss"` and `force: true`, bypassing the 50-offering preview/escrow format, and returns the cycle summary: candidates scanned, contactable, eligible, pitched, skipped. `03210388 status` returns the live outreach and pipeline state.
+
+**General conversation.** Anything that matches no offering is answered by `askText` in `src/services/ai.js`: Groq first, Gemini whenever Groq is unconfigured or fails. The response carries a compact capability summary (category counts, example requests and a pointer to `GET /api/offerings`); the full catalog is still returned when the message explicitly asks for it, for example `list offerings`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in:
@@ -402,20 +444,23 @@ Copy `.env.example` to `.env` and fill in:
 | `AGENT_PRIVATE_KEY` | Yes | 0x-prefixed 32-byte key. Provider wallet identity and all transactions. |
 | `BASE_RPC_URL` | Recommended | Defaults to `https://mainnet.base.org`; use Alchemy/QuickNode/CDP for production throughput. |
 | `GROQ_API_KEY` / `GEMINI_API_KEY` | Required for intelligence | Groq (`qwen/qwen3.8-27b`, `GROQ_MODEL`) handles fast JSON intent and execution-time briefs; Gemini (`gemini-3.8-flash`, `GEMINI_MODEL`) handles Google Search grounding and is primary for article generation. Each engine falls back to the other automatically. The ten original intelligence offerings require at least one key (`503 AI_NOT_CONFIGURED` otherwise); the eighteen zero-gas insight offerings deliver deterministic data even when both engines are down. |
+| `GROQ_MAX_OUTPUT_TOKENS` | Optional | Per-request Groq output cap, default 1000. The Groq service tier rejects larger requests, so long briefs continue on Gemini. |
+| `BOSS_PASSCODE` | Optional | Admin passcode for `/api/chat`, default `03210388`. A message containing it is answered with the boss acknowledgement and unlocks the admin commands (outbound agent discovery, status). Never echoed back. |
+| `BOSS_SESSION_TTL_SECONDS` | Optional | How long a verified passcode keeps the admin commands unlocked for the same operator, default 1800 (60–86400). |
 | `COINGECKO_API_KEY` | Optional | Raises CoinGecko rate limits; public API works keyless. |
 | `NEWS_FEEDS` | Optional | Comma-separated RSS feeds. Defaults to CoinDesk, The Block, Decrypt and CryptoSlate. |
 | `TWITTER_BEARER_TOKEN` / `KOL_HANDLES` | Optional | Enables live X API posts for `twitter_alpha` / `kol_alpha`; without them those offerings use Gemini grounding citations. |
 | `DATA_TIMEOUT_MS` / `GROUNDING_TIMEOUT_MS` / `NEWS_TIMEOUT_MS` | Optional | Per-provider timeouts (defaults 9 s / 20 s / 7 s). |
 | `INTEL_CACHE_TTL_MS` | Optional | Shared provider cache TTL (default 45 s). |
 | `MIN_YIELD_TVL_USD` / `MIN_TOKEN_LIQUIDITY_USD` | Optional | Quality floors for yield pools and token liquidity. |
-| `SOCIAL_AUTOPOST` | Optional | `false` by default. Set `true` to publish autonomously (requires AI + X credentials). |
+| `SOCIAL_AUTOPOST` | Optional | `true` by default. Set `false` to pause autonomous publishing (requires AI + X credentials). |
 | `SOCIAL_INTERVAL_MINUTES` | Optional | Publish cadence, default 300 (5 h), bounded 240–1440. |
 | `SOCIAL_MAX_POSTS_PER_DAY` | Optional | Hard daily cap (default 4). |
-| `X_CONSUMER_KEY` / `X_CONSUMER_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | For posting | OAuth 1.0a user credentials with write access. |
-| `X_USER_ACCESS_TOKEN` | Alternative | OAuth 2.0 user token (e.g. from a Virtuals X OAuth connection). |
+| `X_CONSUMER_KEY` / `X_CONSUMER_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | For posting | OAuth 1.0a user credentials with write access. `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN` and `TWITTER_ACCESS_TOKEN_SECRET` are accepted aliases. |
+| `X_USER_ACCESS_TOKEN` | Alternative | OAuth 2.0 user token (e.g. from a Virtuals X OAuth connection). `TWITTER_USER_ACCESS_TOKEN` is an accepted alias. |
 | `API_KEY` | Recommended | When set, `POST /api/acp`, `POST /api/chat`, `POST /api/quote` and the `GET /api/revenue*` endpoints require `x-api-key` or `Authorization: Bearer`. |
-| `CRON_SECRET` | Required for cron | Vercel sends `Authorization: Bearer $CRON_SECRET` to cron requests. Without it `/api/cron/sweep`, `/api/cron/intake`, `/api/cron/social`, `/api/cron/outreach` and `/api/cron/revenue` return 503. |
-| `ACP_API_KEY` | Optional | Bearer token for the Virtuals ACP API (`/agents`). Also used as the default outreach directory token. Without it, discovery uses on-chain activity and `OUTREACH_TARGETS`. |
+| `CRON_SECRET` | Required for cron | Vercel sends `Authorization: Bearer $CRON_SECRET` to cron requests; other schedulers and the agent's own outreach wake-up send `x-cron-secret`. There is no built-in fallback secret: without it `/api/cron/sweep`, `/api/cron/intake`, `/api/cron/social`, `/api/cron/outreach` and `/api/cron/revenue` return 503 and `wakeOutreachCycle()` skips the call. |
+| `ACP_API_KEY` | Optional | Bearer token for the Virtuals ACP API (`/agents`). Also used as the default token for the optional authenticated outreach index. Public directory, registry, on-chain and allowlist discovery work without it. |
 | `UPSTASH_REDIS_REST_URL` / `TOKEN` | Required on Vercel | Durable job records, distributed locks, shared rate limits. Memory fallback is not reliable across serverless instances. |
 | `ACP_CONTRACT_ADDRESS` | Optional | Defaults to the official Base escrow. |
 | `ACP_AGENT_ID` | Optional | Shown in metadata/logs. |
@@ -431,16 +476,24 @@ Copy `.env.example` to `.env` and fill in:
 | `ACP_INTAKE_BUDGET_MS` | Optional | Wall-clock budget per pass, default 45000 (5000–55000). Remaining jobs are deferred. |
 | `ACP_INTAKE_START_ID` | Optional | First job id to scan on a fresh deployment. Default 0 anchors the cursor at the current `jobCounter()` head instead of replaying history. |
 | `A2A_ENABLED` | Optional | `true` by default. Set `false` to disable `/a2a` and the agent cards. |
-| `OUTREACH_ENABLED` | Optional | `true` by default. Drives outbound discovery and pitching; the loop stays idle until `PUBLIC_BASE_URL` is set. Set `false` to disable entirely. |
+| `OUTREACH_ENABLED` | Optional | `true` by default. Drives outbound discovery and pitching once `PUBLIC_BASE_URL` is configured or a trusted deployment URL is observed from the first inbound request. Set `false` to disable entirely. |
 | `OUTREACH_INTERVAL_SECONDS` / `OUTREACH_BUDGET_MS` | Optional | Local loop cadence (default 600, bounded 120–3600) and per-cycle wall-clock budget (default 40000, 10000–50000). |
 | `OUTREACH_DAILY_CAP` / `OUTREACH_MAX_TARGETS` | Optional | Pitches per UTC day (default 5, 1–20) and targets per cycle (default 2, 1–5). |
 | `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 55, 0–100) and per-target cooldown (default 72 h, 6–720). |
 | `OUTREACH_SCAN_JOBS` | Optional | Recent on-chain jobs sampled for candidate discovery, default 60 (10–200). |
-| `OUTREACH_INDEX_URL` / `OUTREACH_INDEX_TOKEN` | Optional | Agent directory endpoint (default ACP `/agents`) and its bearer token (falls back to `ACP_API_KEY`). |
+| `OUTREACH_INDEX_URL` / `OUTREACH_INDEX_TOKEN` | Optional | Optional authenticated agent-index endpoint (default ACP `/agents`) and its bearer token (falls back to `ACP_API_KEY`). |
+| `OUTREACH_DIRECTORY_URL` / `OUTREACH_REGISTRY_URL` | Optional | Keyless public Virtuals directory (default `https://acpx.virtuals.io/api/agents`) and ACP registry base (default `https://api.acp.virtuals.io/agents`). |
+| `OUTREACH_DIRECTORY_LIMIT` / `OUTREACH_DIRECTORY_PAGES` / `OUTREACH_DIRECTORY_MAX_PAGES` | Optional | Directory page size (default 100, the provider maximum), consecutive pages per cycle (default 4, max 4) and the fallback sweep bound in pages (default 900) used until the directory's own reported page count takes over. |
+| `OUTREACH_MAX_CANDIDATES` / `OUTREACH_CARD_PROBES` | Optional | Scored candidates examined per cycle (default 40) and agent cards probed in parallel for a live A2A endpoint (default 12). Both bound the work inside one cycle; neither bounds how much of the directory the sweep reaches. |
+| `OUTREACH_X_PITCH` | Optional | X mentions for directory agents without A2A endpoints (default `true`). |
 | `OUTREACH_TARGETS` / `OUTREACH_KEYWORDS` | Optional | Comma-separated public HTTPS A2A cards/URLs to contact, and extra targeting keywords. |
 | `OUTREACH_SESSION_TTL_SECONDS` / `OUTREACH_EXTENSION_SECONDS` / `OUTREACH_MAX_TURNS` | Optional | Five-minute session cap (default 300, 120–600), one justified extension (default 120 s), and turn cap (default 6). |
 | `OUTREACH_PRICE_MULTIPLIER` / `OUTREACH_MAX_PRICE_USDC` | Optional | Complexity multiplier (default 1, 0.5–3) and maximum quoted price (default 0.075 USDC). Quotes never go below list. |
 | `OUTREACH_CARD_TIMEOUT_MS` / `OUTREACH_SEND_TIMEOUT_MS` | Optional | A2A card fetch (default 6 s) and outbound send (default 9 s) timeouts. |
+| `CUSTOM_TASK_ENABLED` | Optional | `true` by default. Turns the beyond-catalogue ask, the `custom_task` order id and the inbound quote path on or off. |
+| `CUSTOM_TASK_BASE_PRICE_USDC` / `CUSTOM_TASK_MAX_PRICE_USDC` | Optional | Tier-1 price (default 0.05) and the hard ceiling (default 0.5). Tiers 2–5 are 1.5×/2×/2.5×/3× the base. |
+| `CUSTOM_TASK_MIN_CHARS` / `CUSTOM_TASK_MAX_CHARS` | Optional | Accepted brief length (default 24–600 characters). |
+| `CUSTOM_TASK_DEEP_THRESHOLD` / `CUSTOM_TASK_BUDGET_MS` | Optional | Complexity at which Gemini is preferred even without a deep signal (default 4) and the AI time budget for one brief (default 40 s). |
 | `REVENUE_ENABLED` | Optional | `true` by default. Enables the local revenue loop. `/api/cron/revenue` still runs when the loop is off. |
 | `REVENUE_INTERVAL_SECONDS` / `REVENUE_BUDGET_MS` | Optional | Local cycle cadence (default 300, bounded 120–3600) and wall-clock budget (default 45000, 10000–55000). |
 | `DONATION_SERVICE_MARGIN_BPS` | Optional | Service margin retained from donation escrow, default 2000 (20%), clamped to 2000–5000. |
@@ -477,7 +530,7 @@ npm start              # http://localhost:3000 (intake loop starts after 15 s)
 ## Deploy to Vercel
 
 1. Push this directory to a Git repository.
-2. Import it in Vercel (framework preset: **Other**). `vercel.json` rewrites every path to the `api/index.js` function (`/api/index`) and allows 60 seconds / 1024 MB per invocation. The build command is `npm run build`, which fails the deployment on unresolved imports, circular dependencies, mock/stub code, or an invalid cron/rewrite manifest.
+2. Import it in Vercel (framework preset: **Other**). `vercel.json` disables backend-framework auto-detection, rewrites every path to the `api/index.js` function (`/api/index`), allows 60 seconds per invocation and uses Vercel's default memory allocation. The build command is `npm run build`, which fails the deployment on unresolved imports, circular dependencies, mock/stub code, or an invalid cron/rewrite manifest.
 3. Add the environment variables above (at minimum `AGENT_PRIVATE_KEY`, `BASE_RPC_URL`, `UPSTASH_*`, `CRON_SECRET`, `API_KEY`, and one AI key).
 4. Deploy, then confirm:
    - `GET https://<app>.vercel.app/api/health` → HTTP 200, `ready: true`
@@ -489,15 +542,26 @@ npm start              # http://localhost:3000 (intake loop starts after 15 s)
 5. Optional: fund the agent wallet with a few dollars of Base ETH to unlock the six on-chain offerings once it crosses `ONCHAIN_UNLOCK_MIN_USD`. The 44 zero-gas offerings earn without any wallet balance.
 6. Run `VERIFY_BASE_URL=https://<app>.vercel.app npm run verify`.
 
+### Zero-touch outbound activation
+
+Nothing has to be run from a terminal after the deployment exists. With `PUBLIC_BASE_URL`, `CRON_SECRET`, an AI key and the wallet key set, the chain is:
+
+1. The first inbound request — a Virtuals probe, an agent-card fetch, a peer reply — reaches `observePublicUrl` in the global middleware in `src/app.js`.
+2. Because the URL is newly configured or newly observed, `observePublicUrl` reports `changed: true` and the middleware calls `wakeOutreachCycle(url, { reason: "activation" })`, which fetches `GET /api/cron/outreach?reason=activation&force=1` with `x-cron-secret` on this deployment.
+3. That wake runs `runOutreachCycle` inside its own serverless invocation: intake cursor bootstrap → directory sweep (2 pages, persisted cursor) → score → eligible candidates → teaser → analysis → pitch over A2A or X → session save. `force=1` bypasses only the 10-minute interval, never the daily cap, the 72-hour cooldown, the opt-out set or the lock.
+4. From then on the four cron slots plus `maybeWakeOutreach` on inbound traffic keep the cycle running, and each cycle advances the directory cursor, so discovery continues across the whole network without an operator.
+
+Without `PUBLIC_BASE_URL`, activation waits for the first request on a trusted `*.vercel.app` host — the same runtime path, just observed instead of configured. `CRON_SECRET` is mandatory: every cron route fails closed with 503 when it is missing, so an unset secret means no outreach rather than an open endpoint. `ALLOW_UNPAID_EXECUTION` is ignored on Vercel and when `NODE_ENV=production`, so a deployed agent cannot execute an unfunded job.
+
 ### Vercel Cron plan limits
 
 `vercel.json` schedules the sweeper daily (`0 0 * * *`) because Hobby projects cannot run more frequent crons. On Pro, change it to `*/10 * * * *` for faster refund retries. The sweeper also runs opportunistically when stale refunds are encountered.
 
 The intake cron is daily at `0 0 * * *` for the same reason. **Autonomy is limited by that schedule on Hobby:** a funded job waits up to a day before it is picked up. On Pro (or any host where you can call the endpoint), schedule `*/2 * * * *` or `* * * * *` and keep `ACP_INTAKE_BATCH` low enough for the 60 s limit. Any external scheduler can also call `GET /api/cron/intake` with `Authorization: Bearer $CRON_SECRET`; the distributed lock makes overlapping triggers harmless. Local `npm start` is not affected and polls every 60 s.
 
-The social cron is scheduled daily at `0 6 * * *` for the same reason. For the intended 4–6 hour cadence on Vercel, use a Pro project and set the schedule to `0 */4 * * *`, or point any external scheduler at `GET /api/cron/social` with `Authorization: Bearer $CRON_SECRET`. `SOCIAL_INTERVAL_MINUTES` still throttles duplicate runs, so a more frequent trigger cannot exceed the configured cadence or daily cap.
+The social cron has four individually daily Hobby-compatible slots: `0 6 * * *`, `0 12 * * *`, `0 18 * * *` and `0 23 * * *`. `SOCIAL_INTERVAL_MINUTES` throttles duplicate runs, so these triggers cannot exceed the configured cadence or daily cap. For a different cadence, point an external scheduler at `GET /api/cron/social` with `Authorization: Bearer $CRON_SECRET`.
 
-The outreach cron is scheduled daily at `0 2 * * *`. That is enough to respect the 72-hour cooldown and daily cap but far slower than the intended 10-minute cadence. On Pro, set it to `*/10 * * * *`; on any host, point an external scheduler at `GET /api/cron/outreach` with the same bearer token. The interval throttle, daily cap, cooldown, opt-out set and distributed lock all still apply, so a more frequent trigger cannot send more messages than configured. `npm start` runs the loop locally.
+The outreach cron likewise has four individually daily slots: `0 2 * * *`, `0 8 * * *`, `0 14 * * *` and `0 20 * * *`, plus the immediate activation wake-up after the Virtuals chat URL starts receiving requests. On Pro, use `*/10 * * * *` for the intended 10-minute cadence; on any host, an external scheduler can call `GET /api/cron/outreach` with the same bearer token. The interval throttle, daily cap, cooldown, opt-out set and distributed lock all still apply, so more frequent triggers cannot send more messages than configured. `npm start` runs the loop locally.
 
 The revenue cron is scheduled daily at `0 3 * * *`. That covers retainer delivery and referral retries, but arbitrage/whale detection is only useful near real time. For the intended cadence on Vercel, use a Pro project and set `*/5 * * * *`, or point an external scheduler at `GET /api/cron/revenue` with the bearer token. The distributed lock and interval throttle prevent overlapping cycles; `REVENUE_BUDGET_MS` keeps each run inside the function limit. `npm start` runs the loop every `REVENUE_INTERVAL_SECONDS` (default 300).
 
@@ -511,7 +575,7 @@ The revenue cron is scheduled daily at `0 3 * * *`. That covers retainer deliver
    - `POST /api/acp`
    - `GET /.well-known/agent.json` (A2A v0.3) and `GET /.well-known/agent-card.json` (v1.0)
    - `POST /a2a`
-4. Keep `PUBLIC_BASE_URL` set to the deployed URL. KyberSwap requests carry it as their origin, and the A2A cards publish it as the agent URL.
+4. Set `PUBLIC_BASE_URL` to the deployed URL, especially when using a custom domain. KyberSwap requests carry it as their origin, and the A2A cards publish it as the agent URL. Without it, the agent can learn its public URL from the first inbound request on a trusted Vercel deployment host after the chat URL is saved; that first request also wakes an immediate outreach cycle. There is no dashboard webhook, so activation cannot happen before Virtuals first calls the agent.
 5. For fully autonomous execution, enable the intake cron at a useful cadence (see the plan limits above) or point an external scheduler at `/api/cron/intake`. Jobs created through the ACP dashboard must put the order in the description using one of the documented shapes; prose descriptions are skipped, not executed.
 
 ## Operational notes
@@ -562,10 +626,11 @@ src/services/ta.js        deterministic EMA/RSI/ATR/Bollinger, momentum, trade p
 src/services/intel.js     the ten intelligence handlers + AI synthesis
 src/services/articles.js  autonomous article research, synthesis, number validation, thread assembly
 src/services/social.js    idle-gated scheduler: cadence, caps, locking, publish state
+src/services/chat.js     boss passcode gate, admin command routing, conversational chat replies
 src/services/x.js         X API v2 user-context posting (OAuth 1.0a / OAuth 2.0 user token)
 src/chain/client.js       viem clients, transaction serialization, allowances
 src/lib/                  errors, HTTP client, RSS/XML parser, logger, Upstash store, rate limiting
-test/                     node:test unit tests (offerings, intents, AI routing, TA, RSS, sentiment, store, social, intake, A2A, discovery/outreach, pricing/quotes/revenue)
+test/                     node:test unit tests (offerings, intents, AI routing, TA, RSS, sentiment, store, social, intake, A2A, discovery/outreach, pricing/quotes/revenue, chat/boss)
 scripts/verify-live.js    read-only live verification
 scripts/social-preview.js real article generation without posting
 scripts/build-check.js    import/cycle/stub/Vercel-manifest pre-deploy check

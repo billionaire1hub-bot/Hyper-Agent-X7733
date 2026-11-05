@@ -44,10 +44,10 @@ const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
 check(
   "package identity",
-  pkg.name === "hyper-agent-x7733" && pkg.version === "1.6.0",
+  pkg.name === "hyper-agent-x7733" && pkg.version === "1.6.1",
   `${pkg.name}@${pkg.version}`
 );
-check("ESM + Node >= 20", pkg.type === "module" && /^>=20/.test(pkg.engines?.node || ""), pkg.engines?.node || "missing");
+check("ESM + Node 24.x", pkg.type === "module" && pkg.engines?.node === "24.x", pkg.engines?.node || "missing");
 check("start and build scripts", Boolean(pkg.scripts?.start && pkg.scripts?.build), Object.keys(pkg.scripts || {}).join(", "));
 check("serverless entry point", pkg.main === "api/index.js", pkg.main || "missing");
 
@@ -175,8 +175,17 @@ const rewrite = (vercel.rewrites || []).find((rule) => rule.destination === "/ap
 check("vercel rewrites to the function", Boolean(rewrite), rewrite?.source || "missing");
 check(
   "vercel function limits",
-  vercel.functions?.["api/index.js"]?.maxDuration === 60 && vercel.functions?.["api/index.js"]?.memory === 1024,
+  vercel.functions?.["api/index.js"]?.maxDuration === 60 &&
+    !("memory" in (vercel.functions?.["api/index.js"] || {})),
   JSON.stringify(vercel.functions?.["api/index.js"] || {})
+);
+check("backend framework auto-detection disabled", vercel.framework === null, String(vercel.framework));
+const npmrc = await readFile(path.join(root, ".npmrc"), "utf8");
+check(
+  "npm build notices disabled",
+  ["audit=false", "fund=false", "update-notifier=false"].every((line) => npmrc.includes(line)) &&
+    !/(?<!#.*)use-node-version/.test(npmrc),
+  npmrc.trim().split(/\r?\n/).join(", ")
 );
 
 const routesSource = await readFile(path.join(root, "src/routes/api.js"), "utf8");
@@ -185,10 +194,38 @@ const appSource = await readFile(path.join(root, "src/app.js"), "utf8");
 const cronPaths = (vercel.crons || []).map((cron) => cron.path);
 const missingCrons = cronPaths.filter((cronPath) => !routesSource.includes(cronPath));
 check("cron routes are implemented", cronPaths.length > 0 && missingCrons.length === 0, cronPaths.join(", ") || "no crons");
+const authSource = await readFile(path.join(root, "src/middleware/auth.js"), "utf8");
+const wakeSource = await readFile(path.join(root, "src/services/activation.js"), "utf8");
+const cronRouteDeclarations = routesSource
+  .split(/\r?\n/)
+  .filter((line) => line.startsWith('router.all("/api/cron/'));
+const ungatedCronRoutes = cronRouteDeclarations.filter((line) => !line.includes("requireCronSecret"));
+check(
+  "cron routes are gated only by CRON_SECRET",
+  cronRouteDeclarations.length > 0 &&
+    ungatedCronRoutes.length === 0 &&
+    !routesSource.includes("allowCron") &&
+    authSource.includes("if (!config.cronSecret)") &&
+    authSource.includes("safeEqual(provided, config.cronSecret)") &&
+    !/"[0-9]{6,}"/.test(routesSource) &&
+    !/\|\|\s*"[0-9]{6,}"/.test(wakeSource) &&
+    wakeSource.includes('if (!config.cronSecret) return { ok: false, skipped: "cron_secret_missing" };') &&
+    wakeSource.includes('"x-cron-secret": config.cronSecret') &&
+    routesSource.includes('import { requireApiKey, requireCronSecret } from "../middleware/auth.js"'),
+  ungatedCronRoutes.length
+    ? `ungated: ${ungatedCronRoutes.join(" | ")}`
+    : `${cronRouteDeclarations.length} cron routes fail closed on CRON_SECRET; no embedded literal`
+);
 check(
   "cron schedules are valid",
   (vercel.crons || []).every((cron) => typeof cron.schedule === "string" && cron.schedule.split(" ").length === 5),
   (vercel.crons || []).map((cron) => `${cron.path} ${cron.schedule}`).join("; ")
+);
+check(
+  "social and outreach run throughout the day",
+  (vercel.crons || []).filter((cron) => cron.path === "/api/cron/social").length === 4 &&
+    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/outreach").length === 4,
+  "4 social slots + 4 outreach slots, each individually daily"
 );
 check(
   "ACP intake wired",
@@ -220,6 +257,26 @@ check(
     configSource.includes("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913") &&
     !/sepolia|testnet|goerli/i.test(configSource),
   "chain 8453 / mainnet RPC / USDC / ACP"
+);
+
+const chatSource = await readFile(path.join(root, "src/services/chat.js"), "utf8");
+const aiSource = await readFile(path.join(root, "src/services/ai.js"), "utf8");
+check(
+  "boss passcode and chat fallback wired",
+  configSource.includes("BOSS_PASSCODE") &&
+    configSource.includes("passcode:") &&
+    chatSource.includes("bossPasscode") &&
+    chatSource.includes("containsPasscode") &&
+    chatSource.includes("handleBossMessage") &&
+    chatSource.includes("adminRequiredReply") &&
+    chatSource.includes("runOutreachCycle") &&
+    chatSource.includes("capabilitySummary") &&
+    routesSource.includes("handleBossMessage") &&
+    routesSource.includes("capabilitySummary") &&
+    routesSource.includes("wantsCatalog") &&
+    aiSource.includes("askText") &&
+    aiSource.includes('chat: "groq"'),
+  "passcode gate, boss discovery, conversational reply"
 );
 
 const {
@@ -358,12 +415,154 @@ check(
     healthSource.includes("ethUsdSource"),
   "USD threshold -> live ETH price -> wei gate; labeled fallback when price fetch fails"
 );
+const activationSource = await readFile(path.join(root, "src/services/activation.js"), "utf8");
+const socialSource = await readFile(path.join(root, "src/services/social.js"), "utf8");
 check(
   "outreach enabled by default",
   configSource.includes("bool(process.env.OUTREACH_ENABLED, true)") &&
     outreachSource.includes("config.outreach.enabled") &&
-    outreachSource.includes("config.publicBaseUrl"),
-  "discovery/pitch loop starts by default, self-guarded without PUBLIC_BASE_URL"
+    outreachSource.includes("loadPublicUrl"),
+  "discovery/pitch loop starts by default after the public URL is configured or observed"
+);
+check(
+  "chat URL activation wakes outreach immediately",
+  activationSource.includes("observePublicUrl") &&
+    activationSource.includes("wakeOutreachCycle") &&
+    activationSource.includes("VERCEL_PROJECT_PRODUCTION_URL") &&
+    appSource.includes("observePublicUrl(req)") &&
+    appSource.includes("wakeOutreachCycle(activation.url, { reason: \"activation\" })") &&
+    routesSource.includes("/api/outreach/start"),
+  "trusted deployment host observation + authenticated self-wake + manual start"
+);
+check(
+  "inbound traffic keeps the outreach cycle self-waking between cron slots",
+  activationSource.includes("export async function maybeWakeOutreach") &&
+    activationSource.includes("export function outreachCycleDue") &&
+    activationSource.includes("storeHelpers.outreachKick()") &&
+    activationSource.includes("onlyIfAbsent: true") &&
+    activationSource.includes("config.outreach.intervalSeconds") &&
+    activationSource.includes("loadOutreachState") &&
+    appSource.includes("maybeWakeOutreach({ reason: \"traffic\" })") &&
+    appSource.includes('!req.path.startsWith("/api/cron/")') &&
+    activationSource.includes("force: false"),
+  "one force-free wake per interval, throttled by a store marker, never re-armed by the cron route itself"
+);
+const customSource = await readFile(path.join(root, "src/services/custom.js"), "utf8");
+const a2aSource = await readFile(path.join(root, "src/services/a2a.js"), "utf8");
+const { agentCard } = await import(pathToFileURL(path.join(root, "src/services/a2a.js")).href);
+const cardSkills = agentCard("https://build-check.invalid").skills.length;
+check(
+  "custom work outside the 50 offerings routes between Groq and Gemini",
+  configSource.includes("CUSTOM_TASK_ENABLED") &&
+    configSource.includes("CUSTOM_TASK_BASE_PRICE_USDC") &&
+    offeringsSource.includes("export function assessCustomTask") &&
+    offeringsSource.includes('engine: deep ? "gemini" : "groq"') &&
+    offeringsSource.includes("if (config.custom.enabled && id === CUSTOM_TASK_OFFERING_ID)") &&
+    customSource.includes("askJSON(SYSTEM_JSON") &&
+    customSource.includes("askText(SYSTEM_TEXT") &&
+    customSource.includes("prefer: assessment.engine") &&
+    customSource.includes("CUSTOM_AI_UNAVAILABLE") &&
+    customSource.includes("askGrounded(") &&
+    pipelineSource.includes("offering.custom") &&
+    pipelineSource.includes("executeCustomTask") &&
+    pricingSource.includes("customPriceUsdc") &&
+    outreachSource.includes("customAskSession") &&
+    outreachSource.includes('"custom_asked"') &&
+    outreachSource.includes("orderMatchesSession") &&
+    a2aSource.includes("customInboundReply") &&
+    routesSource.includes('router.get("/api/custom"') &&
+    aiSource.includes('"custom_task"') &&
+    OFFERINGS.length === 50 &&
+    !OFFERINGS.some((offering) => offering.id === "custom_task") &&
+    cardSkills === 50,
+  "synthetic custom_task offering: priced and routed from the brief, never a 51st registered offering or agent-card skill"
+);
+check(
+  "live directory and X outreach channels wired",
+  configSource.includes("OUTREACH_DIRECTORY_URL") &&
+    configSource.includes("OUTREACH_REGISTRY_URL") &&
+    configSource.includes("OUTREACH_X_PITCH") &&
+    outreachSource.includes("buildMentionPitch") &&
+    outreachSource.includes("sendXPitch") &&
+    outreachSource.includes("tasksReviewed"),
+  "public Virtuals tasks, A2A pitches and X mentions"
+);
+const discoverySource = await readFile(path.join(root, "src/services/discovery.js"), "utf8");
+const storeSource = await readFile(path.join(root, "src/lib/store.js"), "utf8");
+const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
+check(
+  "Virtuals directory pagination follows the live API contract",
+  discoverySource.includes("pagination[page]=") &&
+    discoverySource.includes("pagination[pageSize]=") &&
+    !discoverySource.includes("page=${Math.max") &&
+    discoverySource.includes('retries: 2, service: "virtuals-directory"') &&
+    configSource.includes("OUTREACH_INDEX_URL") &&
+    configSource.includes("process.env.ACP_API_KEY"),
+  "nested pagination params + two retries on transient upstream 5xx; authenticated index only used when a token exists"
+);
+check(
+  "directory discovery sweeps the whole network instead of one fixed page",
+  discoverySource.includes("export function directoryPageRange") &&
+    discoverySource.includes("pages.map((page) => fetchVirtualsDirectoryPage({ page }))") &&
+    discoverySource.includes("export async function fetchVirtualsDirectoryPage") &&
+    discoverySource.includes("meta?.pagination?.pageCount") &&
+    discoverySource.includes("directorySweepPages: directoryPageCount,") &&
+    discoverySource.includes("nextPage:") &&
+    sweepStateSource.includes("export async function loadDirectorySweep") &&
+    sweepStateSource.includes("export async function saveDirectorySweep") &&
+    sweepStateSource.includes("export function sweepTotalPages") &&
+    outreachSource.includes("const sweep = await loadDirectorySweep()") &&
+    outreachSource.includes("directoryMaxPages: sweep.maxPages") &&
+    outreachSource.includes("page: discovery.sources?.nextPage || 1") &&
+    outreachSource.includes("pageCount: discovery.sources?.directorySweepPages || null") &&
+    outreachSource.includes("discovery.candidates.slice(0, config.outreach.maxCandidates)") &&
+    storeSource.includes('outreachSweep: () => key("outreach:directory:sweep")') &&
+    configSource.includes("OUTREACH_DIRECTORY_PAGES") &&
+    configSource.includes("OUTREACH_DIRECTORY_MAX_PAGES") &&
+    configSource.includes("OUTREACH_MAX_CANDIDATES") &&
+    configSource.includes("OUTREACH_CARD_PROBES"),
+  "400 directory agents are read per cycle over four parallel pages, the cursor and the directory's own page count persist in the store, and the sweep wraps instead of stopping"
+);
+check(
+  "unpaid execution cannot exist in production",
+  configSource.includes("allowUnpaidExecution:") &&
+    configSource.includes("!process.env.VERCEL") &&
+    configSource.includes('str(process.env.NODE_ENV, "development") !== "production"'),
+  "ALLOW_UNPAID_EXECUTION is inert on Vercel and under NODE_ENV=production, so a live job can never execute unfunded"
+);
+check(
+  "live ACP track record drives target scoring",
+  discoverySource.includes("successfulJobCount") &&
+    discoverySource.includes("uniqueBuyerCount") &&
+    discoverySource.includes("grossAgenticAmount") &&
+    discoverySource.includes("acp-settled:") &&
+    discoverySource.includes("acp-success:") &&
+    discoverySource.includes("acp-volume:>=$1k") &&
+    discoverySource.includes("acp-dormant:>180d") &&
+    discoverySource.includes("acp-active:<30d") &&
+    discoverySource.includes("resources.find") &&
+    discoverySource.includes('!String(candidate.source).includes("allowlist")'),
+  "settled jobs, success rate, buyers, volume and recency scored; unverified resource URLs are not channels"
+);
+check(
+  "outreach boots intake cursor, executes funded replies and reports AI routing",
+  intakeSource.includes("export async function ensureIntakeCursor") &&
+    outreachSource.includes("ensureIntakeCursor(reason)") &&
+    outreachSource.includes("executeJob = executeAcpJob") &&
+    outreachSource.includes("funded_unverified") &&
+    outreachSource.includes("aiHealth") &&
+    outreachSource.includes("intakeStatus") &&
+    outreachSource.includes('prefer: "groq"'),
+  "cursor bootstrap + on-reply escrow verification/execution + Groq/Gemini status diagnostics"
+);
+check(
+  "X posting defaults and diagnostics wired",
+  configSource.includes("bool(process.env.SOCIAL_AUTOPOST, true)") &&
+    configSource.includes("TWITTER_API_KEY") &&
+    configSource.includes("TWITTER_ACCESS_TOKEN_SECRET") &&
+    socialSource.includes("xDiagnostics") &&
+    socialSource.includes("socialPublishDue"),
+  "autopost on, X_*/TWITTER_* aliases, exact missing-slot diagnostics"
 );
 check(
   "zero-gas intelligence suite untouched by the gate",

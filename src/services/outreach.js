@@ -1,81 +1,44 @@
 import crypto from "node:crypto";
-import { config, isVercel } from "../config.js";
-import { fetchJSON } from "../lib/http.js";
+import { config, isVercel, walletConfigured } from "../config.js";
 import { logger } from "../lib/logger.js";
 import { acquireLock, releaseLock, store, storeHelpers } from "../lib/store.js";
 import { getAgentAddress } from "../chain/client.js";
-import { aiConfigured, askGrounded, askJSON } from "./ai.js";
-import { discoverTargets, isPublicHttpUrl, INTEL_OFFERINGS } from "./discovery.js";
+import { aiConfigured, aiHealth, askGrounded, askJSON } from "./ai.js";
+import { activationStatus, loadPublicUrl } from "./activation.js";
+import { customAskText, customQuoteText, normalizeRequirement } from "./custom.js";
+import { discoverTargets, INTEL_OFFERINGS } from "./discovery.js";
 import { getAcpJob } from "./escrow.js";
+import { ensureIntakeCursor, intakeStatus, parseJobOrder } from "./intake.js";
 import { getBinanceDerivatives, getGlobalMarket, getTrendingCoins } from "./market.js";
 import { getLatestNews } from "./news.js";
-import { getOffering } from "./offerings.js";
+import { CUSTOM_TASK_OFFERING_ID, assessCustomTask, getOffering } from "./offerings.js";
+import {
+  dailyPitchCount,
+  dayKey,
+  loadContact,
+  loadDirectorySweep,
+  loadOutreachState,
+  loadSession,
+  nowIso,
+  optOutTarget,
+  optedOutKeys,
+  sanitizeText,
+  saveContact,
+  saveDirectorySweep,
+  saveOutreachState,
+  saveSession,
+  sendA2APitch,
+  sessionTtlSeconds,
+  syncSessionSummary,
+} from "./outreach-session.js";
+import { executeAcpJob } from "./pipeline.js";
 import { checkAgentIdle } from "./social.js";
+import { postTweet, xConfigured } from "./x.js";
 
-const STATE_TTL_SECONDS = 90 * 24 * 60 * 60;
-const SESSION_TTL_SECONDS = 60 * 60;
-const CONTACT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const LOCK_TTL_SECONDS = 300;
 const FAILED_SEND_BACKOFF_MS = 6 * 60 * 60 * 1000;
-const CAMPAIGN = "intel-outreach";
 
-const dayKey = (date = new Date()) => date.toISOString().slice(0, 10);
-const nowIso = () => new Date().toISOString();
 const formatUsdc = (value) => String(Number(Number(value).toFixed(6)));
-
-const emptyState = () => ({
-  day: dayKey(),
-  dayCount: 0,
-  lastAttemptAt: null,
-  lastError: null,
-  totalPitches: 0,
-  outcomes: [],
-  sessions: [],
-  pipeline: [],
-});
-
-const normalizeState = (raw) => ({
-  ...emptyState(),
-  ...(raw && typeof raw === "object" ? raw : {}),
-  outcomes: Array.isArray(raw?.outcomes) ? raw.outcomes.slice(-20) : [],
-  sessions: Array.isArray(raw?.sessions) ? raw.sessions.slice(-20) : [],
-  pipeline: Array.isArray(raw?.pipeline) ? raw.pipeline.slice(-20) : [],
-});
-
-export async function loadOutreachState() {
-  return normalizeState(await store.get(storeHelpers.outreachState()).catch(() => null));
-}
-
-export async function saveOutreachState(state) {
-  await store.set(storeHelpers.outreachState(), state, { ttlSeconds: STATE_TTL_SECONDS });
-  return state;
-}
-
-export const dailyPitchCount = (state, date = new Date()) =>
-  state?.day === dayKey(date) ? Math.max(0, Number(state.dayCount) || 0) : 0;
-
-const contactKeyFor = (targetKey) =>
-  crypto.createHash("sha256").update(String(targetKey)).digest("hex").slice(0, 32);
-
-export async function loadContact(targetKey) {
-  return store.get(storeHelpers.outreachContact(contactKeyFor(targetKey))).catch(() => null);
-}
-
-async function saveContact(targetKey, patch) {
-  const key = contactKeyFor(targetKey);
-  const current = (await store.get(storeHelpers.outreachContact(key)).catch(() => null)) || {};
-  const next = { ...current, ...patch, targetKey, updatedAt: nowIso() };
-  await store.set(storeHelpers.outreachContact(key), next, { ttlSeconds: CONTACT_TTL_SECONDS }).catch(() => null);
-  return next;
-}
-
-export async function optOutTarget(targetKey) {
-  if (!targetKey) return;
-  await store.sadd(storeHelpers.outreachOptOut(), targetKey).catch(() => null);
-}
-
-const optedOutKeys = async () =>
-  new Set(await store.smembers(storeHelpers.outreachOptOut()).catch(() => []));
 
 /**
  * Complexity raises the list price by up to 40%, a configured multiplier can
@@ -151,6 +114,12 @@ export function evaluateNegotiation({ session, text, now = Date.now(), limits = 
     return { action: "expired" };
   }
 
+  // A negotiated custom session has no scope and no price yet: the peer's
+  // reply is the brief, and the quote is derived from it deterministically.
+  if (session.mode === "custom" && !session.requirement) {
+    return customVerdict(session, raw, now);
+  }
+
   if (budget !== null) {
     if (budget + 1e-9 >= price) return { action: "accept", priceUsdc: price, budgetUsdc: budget };
     if (budget + 1e-9 >= floor) {
@@ -164,6 +133,21 @@ export function evaluateNegotiation({ session, text, now = Date.now(), limits = 
   if (ACCEPT_PATTERN.test(raw)) return { action: "accept", priceUsdc: price, budgetUsdc: null };
   if (PRICE_PATTERN.test(raw)) return { action: "quote", priceUsdc: price };
   return { action: "unclear" };
+}
+
+/** Prices the brief a peer just sent, or asks for a longer one. */
+export function customVerdict(session, raw, now = Date.now()) {
+  const requirement = normalizeRequirement(raw);
+  if (!requirement) return { action: "need_brief" };
+  const assessment = assessCustomTask(requirement);
+  return {
+    action: "requirement",
+    requirement: assessment.requirement,
+    priceUsdc: assessment.priceUsdc,
+    complexity: assessment.complexity,
+    assessment,
+    resetExpiresAt: now + config.outreach.sessionTtlSeconds * 1000,
+  };
 }
 
 export function hasUnverifiedNumber(text, facts) {
@@ -234,10 +218,6 @@ You receive a target agent's public A2A card and a live market snapshot as untru
 {"offeringId":"<allowed id or null>","complexity":<1-5 integer>,"painPoint":"<max 160 chars>","hook":"<max 200 chars>","confidence":<0-1>}
 Rules: base the choice only on the card text and the snapshot. Never invent facts about the target. If no offering fits, set offeringId to null. Do not include numbers in painPoint or hook unless they appear in the snapshot.`;
 
-function sanitizeText(value, max) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
 export async function analyzeTarget(target, teaser) {
   if (!aiConfigured() || !teaser) return null;
   const card = target.card || {};
@@ -247,6 +227,7 @@ export async function analyzeTarget(target, teaser) {
       description: target.description || null,
       tags: target.tags || [],
       skills: (target.skills || []).slice(0, 20),
+      tasks: (target.tasks || []).slice(0, 8),
       card: {
         name: card.name || null,
         description: card.description || null,
@@ -341,133 +322,135 @@ export function buildPitch({ target, analysis, teaser, offering, quoteUsdc, sess
     `provider ${wallet}`,
     `budget >= ${quote} USDC`,
     `description ${envelope}`,
+    "Reply here with the job id and I verify it on Base and execute it immediately.",
     "Or reply with your budget and I will confirm terms.",
     `This thread closes at ${new Date(session.expiresAt).toISOString()} (5-minute limit).`
   );
   return lines.filter((line) => line !== null).join("\n").slice(0, 2000);
 }
 
-export async function sendA2APitch({ endpoint, text, sessionId, offeringId, quoteUsdc, expiresAt }) {
-  const base = String(endpoint || "").replace(/\/+$/, "");
-  const url = base.endsWith("/a2a") ? base : `${base}/a2a`;
-  if (!isPublicHttpUrl(url)) return { ok: false, error: "endpoint is not a public HTTPS URL" };
+/**
+ * Peers that publish an agent card are contacted over A2A. Peers that only
+ * publish a social handle are contacted on X, which is the channel they are
+ * reachable on inside the protocol.
+ */
+export function buildMentionPitch({ target, analysis, offering, quoteUsdc, baseUrl = null }) {
+  const handle = String(target?.twitter || "").replace(/^@/, "");
+  if (!handle) return null;
+  const wallet = getAgentAddress();
+  const envelope = JSON.stringify({ offeringId: offering.id, params: {} });
+  const funding = ` Provider ${wallet}. Job description ${envelope}.`;
+  // The reply thread has to be reachable from a public mention: without our own
+  // endpoint in the tweet the peer could only fund blind, and negotiation,
+  // custom briefs and the 5-minute session would never start.
+  const chat = baseUrl ? ` Negotiate: ${String(baseUrl).replace(/^https:\/\//, "//")}/a2a` : "";
+  const pain = analysis?.painPoint ? ` Saw "${sanitizeText(analysis.painPoint, 100)}" on your feed.` : "";
+  const name = sanitizeText(config.name, 40);
+  let text = `@${handle} ${name}: ${offering.name} (${offering.id}) — ${formatUsdc(quoteUsdc)} USDC via Base ACP escrow.${pain}${funding}${chat}`;
+  if (text.length > config.social.maxTweetChars) {
+    text = `@${handle} ${name}: ${offering.id} — ${formatUsdc(quoteUsdc)} USDC via Base ACP escrow.${funding}${chat}`;
+  }
+  if (text.length > config.social.maxTweetChars) {
+    text = `@${handle} ${offering.id} ${formatUsdc(quoteUsdc)} USDC. Base ACP provider ${wallet}. ${envelope}${chat}`;
+  }
+  return text;
+}
 
-  const body = {
-    jsonrpc: "2.0",
-    id: crypto.randomUUID(),
-    method: "message/send",
-    params: {
-      message: {
-        role: "user",
-        messageId: crypto.randomUUID(),
-        contextId: sessionId,
-        parts: [{ kind: "text", text }],
-        metadata: {
-          from: config.publicBaseUrl || null,
-          fromAgent: config.name,
-          campaign: CAMPAIGN,
-          sessionId,
-          offeringId,
-          quotedPriceUsdc: quoteUsdc,
-          expiresAt,
-        },
-      },
-    },
-  };
-
+export async function sendXPitch({ handle, text }) {
+  const clean = String(handle || "").replace(/^@/, "");
+  if (!clean || !/^[A-Za-z0-9_]{1,15}$/.test(clean)) return { ok: false, error: "invalid handle" };
+  if (!xConfigured()) return { ok: false, error: "X_NOT_CONFIGURED" };
   try {
-    const payload = await fetchJSON(
-      url,
-      { method: "POST", body: JSON.stringify(body) },
-      { timeoutMs: config.outreach.sendTimeoutMs, retries: 0, service: "a2a-outreach" }
-    );
-    if (payload?.error) {
-      return { ok: false, error: sanitizeText(payload.error.message, 200) || "target returned a JSON-RPC error" };
-    }
-    if (!payload?.result) return { ok: false, error: "target returned no JSON-RPC result" };
-    return {
-      ok: true,
-      kind: payload.result.kind || null,
-      taskId: payload.result.id || null,
-      contextId: payload.result.contextId || sessionId,
-    };
+    const tweet = await postTweet(text);
+    return { ok: true, tweetId: tweet.id, url: tweet.url };
   } catch (error) {
-    return { ok: false, error: sanitizeText(error.message, 220) };
+    return { ok: false, error: sanitizeText(error.message, 200) };
   }
 }
 
-async function loadSession(sessionId) {
-  if (!sessionId) return null;
-  return store.get(storeHelpers.outreachSession(sessionId)).catch(() => null);
-}
 
-async function saveSession(session) {
-  await store
-    .set(storeHelpers.outreachSession(session.id), session, { ttlSeconds: SESSION_TTL_SECONDS })
-    .catch((error) => logger.warn("failed to save outreach session", { message: error.message }));
-  return session;
-}
 
-async function syncSessionSummary(session, patch = {}) {
-  const state = await loadOutreachState();
-  const summary = {
-    id: session.id,
-    contextId: session.contextId,
-    targetKey: session.targetKey,
-    targetName: session.targetName,
-    endpoint: session.endpoint,
-    offeringId: session.offeringId,
-    priceUsdc: session.priceUsdc,
-    status: session.status,
-    turns: session.turns,
-    createdAt: session.createdAt,
-    expiresAt: session.expiresAt,
-    lastAt: session.lastAt,
-    jobId: session.jobId || null,
+/** A peer that fits no catalogue offering is asked for its own brief. */
+export function customAskSession(candidate, now = Date.now()) {
+  const id = crypto.randomUUID();
+  return {
+    id,
+    contextId: id,
+    targetKey: candidate.key,
+    targetName: candidate.name || candidate.card?.name || candidate.endpoint || candidate.twitter,
+    endpoint: candidate.endpoint || null,
+    channel: "a2a",
+    mode: "custom",
+    offeringId: CUSTOM_TASK_OFFERING_ID,
+    basePriceUsdc: config.custom.basePriceUsdc,
+    priceUsdc: null,
+    floorUsdc: config.custom.basePriceUsdc,
+    requirement: null,
+    status: "open",
+    turns: 0,
+    conceded: false,
+    extended: false,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: now + config.outreach.sessionTtlSeconds * 1000,
+    lastAt: new Date(now).toISOString(),
+    jobId: null,
+    hashes: [],
   };
-  const index = state.sessions.findIndex((entry) => entry.id === session.id);
-  if (index >= 0) state.sessions[index] = summary;
-  else state.sessions.push(summary);
-  state.sessions = state.sessions.slice(-20);
-
-  if (session.status === "accepted" && !state.pipeline.some((entry) => entry.sessionId === session.id)) {
-    state.pipeline.push({
-      sessionId: session.id,
-      targetName: session.targetName,
-      offeringId: session.offeringId,
-      priceUsdc: session.priceUsdc,
-      jobId: session.jobId || null,
-      status: session.jobId ? "funded" : "awaiting_funding",
-      at: nowIso(),
-    });
-    state.pipeline = state.pipeline.slice(-20);
-  }
-
-  if (patch.outcome) {
-    state.outcomes.push(patch.outcome);
-    state.outcomes = state.outcomes.slice(-20);
-  }
-  if (patch.lastError) state.lastError = patch.lastError;
-  await saveOutreachState(state);
-  return state;
 }
 
-export async function registerOutreachSession(session) {
-  await saveSession(session);
-  await syncSessionSummary(session);
+function sessionEnvelope(session) {
+  return JSON.stringify({
+    offeringId: session.offeringId,
+    params: session.mode === "custom" ? { requirement: session.requirement } : {},
+  });
+}
+
+/**
+ * A custom order is only valid when its description carries the exact brief that
+ * was quoted: the tier price, and therefore the escrow amount, is recomputed
+ * from that text. Catalog orders must carry no params at all.
+ */
+function orderMatchesSession(session, order) {
+  if (!order || order.offeringId !== session.offeringId) return false;
+  if (session.mode !== "custom") return Object.keys(order.params || {}).length === 0;
+  const requirement = normalizeRequirement(order.params?.requirement);
+  return Boolean(requirement) && requirement === session.requirement;
+}
+
+/**
+ * Locks a session to a negotiated brief. Price and floor are both the tier
+ * price: conceding below it would break the escrow check, which recomputes the
+ * amount from the requirement alone.
+ */
+function applyCustomBrief(session, assessment, now = Date.now()) {
+  session.requirement = assessment.requirement;
+  session.complexity = assessment.complexity;
+  session.tier = assessment.tier;
+  session.engine = assessment.engine;
+  session.fallbackEngine = assessment.fallbackEngine;
+  session.priceUsdc = assessment.priceUsdc;
+  session.floorUsdc = assessment.priceUsdc;
+  session.expiresAt = now + config.outreach.sessionTtlSeconds * 1000;
   return session;
 }
 
 function negotiationReply(session, verdict, offering, wallet) {
   const quote = formatUsdc(session.priceUsdc);
   const deadline = new Date(session.expiresAt).toISOString();
-  const envelope = JSON.stringify({ offeringId: session.offeringId, params: {} });
+  const envelope = sessionEnvelope(session);
   const funding =
     `Create a funded ACP job on Base with provider ${wallet}, budget >= ${quote} USDC, ` +
-    `and description ${envelope}. The intake poller executes it automatically.`;
+    `and description ${envelope}. Reply with the job id for immediate execution, or let the intake poller pick it up.`;
 
   if (verdict.action === "funded") {
-    return `Confirmed: ACP job ${verdict.jobId} for ${session.offeringId} at ${quote} USDC. The job intake poller will deliver it and submit the deliverable hash on-chain.`;
+    if (session.execution?.status === "completed") {
+      return `Completed ACP job ${verdict.jobId} for ${session.offeringId}. Deliverable hash ${session.execution.deliverableHash}; the evaluator can now complete settlement on Base.`;
+    }
+    if (["refunded", "refund_pending"].includes(session.execution?.status)) {
+      const reason = session.execution?.error?.message ? `: ${session.execution.error.message}` : ".";
+      return `ACP job ${verdict.jobId} for ${session.offeringId} was verified on Base but execution ended ${session.execution.status}${reason} Your escrow is refundable through the ACP contract. Re-send it with the same description and reply with the new job id.`;
+    }
+    return `Confirmed: ACP job ${verdict.jobId} for ${session.offeringId} at ${quote} USDC. The next intake pass executes it${session.execution?.error?.message ? ` (immediate execution deferred: ${session.execution.error.message})` : "."}`;
   }
   if (verdict.action === "accept") {
     return `Agreed at ${formatUsdc(verdict.priceUsdc)} USDC for ${session.offeringId}. ${funding} Quote holds until ${deadline}.`;
@@ -493,7 +476,14 @@ function negotiationReply(session, verdict, offering, wallet) {
  * routing still runs. Closed sessions answer with a canceled task (silent) to
  * stop bot-to-bot ping-pong.
  */
-export async function handleOutreachReply({ text, contextId, message = null, now = Date.now() } = {}) {
+export async function handleOutreachReply({
+  text,
+  contextId,
+  message = null,
+  now = Date.now(),
+  getJob = getAcpJob,
+  executeJob = executeAcpJob,
+} = {}) {
   const direct = await loadSession(contextId);
   const hinted = direct ? null : await loadSession(message?.metadata?.sessionId);
   const session = direct || hinted;
@@ -550,30 +540,96 @@ export async function handleOutreachReply({ text, contextId, message = null, now
     return { handled: true, silent: true, action: "loop" };
   }
 
+  if (verdict.action === "need_brief") {
+    await saveSession(session);
+    await syncSessionSummary(session, {
+      outcome: { at: nowIso(), sessionId: session.id, targetName: session.targetName, action: "need_brief" },
+    });
+    return { handled: true, action: "need_brief", text: customAskText(session.targetName), session };
+  }
+
+  if (verdict.action === "requirement") {
+    applyCustomBrief(session, verdict.assessment, now);
+    await saveSession(session);
+    await saveContact(session.targetKey, {
+      lastOutcome: "custom_quoted",
+      nextAttemptAt: new Date(now + config.outreach.cooldownHours * 3600_000).toISOString(),
+    });
+    await syncSessionSummary(session, {
+      outcome: {
+        at: nowIso(),
+        sessionId: session.id,
+        targetName: session.targetName,
+        action: "custom_quoted",
+        priceUsdc: session.priceUsdc,
+        complexity: session.complexity,
+        engine: session.engine,
+      },
+    });
+    return {
+      handled: true,
+      action: "custom_quoted",
+      text: customQuoteText({ assessment: verdict.assessment, wallet: getAgentAddress(), expiresAt: session.expiresAt }),
+      session,
+    };
+  }
+
   const offering = getOffering(session.offeringId);
   const wallet = getAgentAddress();
 
   if (verdict.action === "funded") {
-    const job = await getAcpJob(verdict.jobId).catch(() => null);
-    const floorUnits = BigInt(Math.round(Number(session.floorUsdc) * 1_000_000));
+    const job = await getJob(verdict.jobId).catch(() => null);
+    const order = job ? parseJobOrder(job.description) : null;
+    // A peer can also skip the chat and fund a fully described custom order.
+    if (session.mode === "custom" && !session.requirement && order?.offeringId === session.offeringId) {
+      const embedded = normalizeRequirement(order.params?.requirement);
+      if (embedded) applyCustomBrief(session, assessCustomTask(embedded), now);
+    }
+    const requiredUnits = BigInt(Math.round(Number(session.priceUsdc) * 1_000_000));
     const valid =
       job &&
       job.status === 1 &&
       String(job.provider).toLowerCase() === String(wallet).toLowerCase() &&
-      BigInt(job.budget || 0) >= floorUnits;
+      BigInt(job.budget || 0) >= requiredUnits &&
+      orderMatchesSession(session, order);
     if (!valid) {
       session.turns += 1;
       session.hashes = [...(Array.isArray(session.hashes) ? session.hashes : []), hash].slice(-8);
       session.lastAt = nowIso();
       await saveSession(session);
+      const brief = session.mode === "custom" ? " Send the exact brief with the job id." : "";
       return {
         handled: true,
         action: "funded_unverified",
-        text: `I cannot see ACP job ${verdict.jobId} funded to provider ${wallet} with a budget of at least ${formatUsdc(
-          session.floorUsdc
-        )} USDC. Check the job state on Base, then reply with the id. This thread closes at ${new Date(
+        text: `I cannot verify ACP job ${verdict.jobId} as a funded ${session.offeringId} order to provider ${wallet} with a budget of at least ${formatUsdc(
+          session.priceUsdc
+        )} USDC and the negotiated description.${brief} Check the job on Base, then reply with the id. This thread closes at ${new Date(
           session.expiresAt
         ).toISOString()}.`,
+      };
+    }
+
+    session.jobId = verdict.jobId;
+    try {
+      const execution = await executeJob({
+        jobId: verdict.jobId,
+        offeringId: order.offeringId,
+        params: order.params,
+        buyer: job.client,
+        quoteId: order.quoteId || null,
+        referrer: order.referrer || null,
+        log: logger,
+      });
+      session.execution = {
+        status: execution?.payload?.status || "deferred",
+        deliverableHash: execution?.payload?.deliverableHash || null,
+        error: execution?.payload?.error || null,
+      };
+    } catch (error) {
+      session.execution = {
+        status: "deferred",
+        deliverableHash: null,
+        error: { code: error.code || "EXECUTION_DEFERRED", message: error.message },
       };
     }
   }
@@ -584,7 +640,10 @@ export async function handleOutreachReply({ text, contextId, message = null, now
   }
 
   if (verdict.action === "accept" || verdict.action === "funded") {
-    session.status = "accepted";
+    session.status =
+      verdict.action === "funded" && !["completed", "deferred"].includes(session.execution?.status)
+        ? "execution_failed"
+        : "accepted";
     if (verdict.action === "funded") session.jobId = verdict.jobId;
   }
   if (verdict.action === "concede") {
@@ -615,7 +674,10 @@ export async function handleOutreachReply({ text, contextId, message = null, now
 
 async function eligibleCandidates(discovery, { now, limit, optedOut }) {
   const result = [];
-  for (const candidate of discovery.candidates) {
+  // Candidates arrive score-sorted. A sweep reads far more agents than one cycle
+  // can act on, and each check is a store read, so only the scored head is
+  // examined instead of every candidate in the merged population.
+  for (const candidate of discovery.candidates.slice(0, config.outreach.maxCandidates)) {
     if (result.length >= limit) break;
     if (!candidate.contactable) continue;
     if ((candidate.score || 0) < config.outreach.minScore) continue;
@@ -640,7 +702,11 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
   if (!aiConfigured()) {
     return { status: "disabled", reason: "AI_NOT_CONFIGURED", reasonSource: reason };
   }
-  if (!config.publicBaseUrl) {
+  if (!walletConfigured) {
+    return { status: "disabled", reason: "WALLET_NOT_CONFIGURED", reasonSource: reason };
+  }
+  const publicUrl = await loadPublicUrl();
+  if (!publicUrl.url) {
     return { status: "disabled", reason: "PUBLIC_BASE_URL_REQUIRED", reasonSource: reason };
   }
 
@@ -651,10 +717,13 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
   const summary = {
     status: "ok",
     reasonSource: reason,
+    publicUrl: publicUrl.url,
+    publicUrlSource: publicUrl.source,
     candidates: 0,
     contactable: 0,
     eligible: 0,
     pitched: 0,
+    asked: 0,
     skipped: 0,
     outcomes: [],
   };
@@ -684,10 +753,23 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       return { ...summary, status: "skipped", reason: "INBOUND_JOB_IN_PROGRESS", jobId: idle.jobId };
     }
 
+    summary.intakeBootstrap = await ensureIntakeCursor(reason);
     state.lastAttemptAt = nowIso();
     await saveOutreachState(state);
 
-    const discovery = await discoverTargets({ scanJobs: config.outreach.scanJobs, now });
+    const sweep = await loadDirectorySweep();
+    const discovery = await discoverTargets({
+      scanJobs: config.outreach.scanJobs,
+      now,
+      directoryPage: sweep.page,
+      directoryMaxPages: sweep.maxPages,
+    });
+    summary.directoryStartPage = sweep.page;
+    summary.directoryPages = discovery.sources?.directoryPages || [];
+    summary.directoryNextPage = await saveDirectorySweep({
+      page: discovery.sources?.nextPage || 1,
+      pageCount: discovery.sources?.directorySweepPages || null,
+    });
     summary.candidates = discovery.candidates.length;
     summary.contactable = discovery.candidates.filter((candidate) => candidate.contactable).length;
     summary.sources = discovery.sources;
@@ -736,8 +818,97 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         continue;
       }
       if (analysis.noFit) {
+        if (!config.custom.enabled || !candidate.endpoint) {
+          summary.skipped += 1;
+          summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_fit" });
+          continue;
+        }
+        const session = customAskSession(candidate);
+        const send = await sendA2APitch({
+          endpoint: candidate.endpoint,
+          text: customAskText(session.targetName),
+          sessionId: session.id,
+          offeringId: session.offeringId,
+          quoteUsdc: config.custom.basePriceUsdc,
+          expiresAt: session.expiresAt,
+          from: publicUrl.url,
+        });
+        if (!send.ok) {
+          summary.skipped += 1;
+          summary.outcomes.push({
+            target: session.targetName,
+            action: "custom_ask_failed",
+            channel: "a2a",
+            error: send.error,
+          });
+          await saveContact(candidate.key, {
+            targetName: session.targetName,
+            endpoint: candidate.endpoint,
+            channel: "a2a",
+            lastOutcome: "custom_ask_failed",
+            lastContactAt: nowIso(),
+            nextAttemptAt: new Date(Date.now() + FAILED_SEND_BACKOFF_MS).toISOString(),
+            score: candidate.score,
+          });
+          continue;
+        }
+        await saveSession(session);
+        if (send.contextId && send.contextId !== session.id) {
+          await store
+            .set(
+              storeHelpers.outreachSession(send.contextId),
+              { ...session, contextId: send.contextId },
+              { ttlSeconds: sessionTtlSeconds }
+            )
+            .catch(() => null);
+        }
+        await saveContact(candidate.key, {
+          targetName: session.targetName,
+          endpoint: candidate.endpoint,
+          channel: "a2a",
+          lastOutcome: "custom_asked",
+          lastContactAt: nowIso(),
+          nextAttemptAt: new Date(Date.now() + config.outreach.cooldownHours * 3600_000).toISOString(),
+          score: candidate.score,
+          sessionId: session.id,
+        });
+        const afterAsk = await loadOutreachState();
+        afterAsk.day = dayKey();
+        afterAsk.dayCount = dailyPitchCount(afterAsk) + 1;
+        afterAsk.totalPitches = (Number(afterAsk.totalPitches) || 0) + 1;
+        afterAsk.lastAttemptAt = nowIso();
+        afterAsk.outcomes.push({
+          at: nowIso(),
+          target: session.targetName,
+          score: candidate.score,
+          offeringId: session.offeringId,
+          action: "custom_asked",
+          channel: "a2a",
+          engine: analysis.engine,
+        });
+        afterAsk.outcomes = afterAsk.outcomes.slice(-20);
+        await saveOutreachState(afterAsk);
+        await syncSessionSummary(session);
+
+        summary.asked += 1;
+        summary.outcomes.push({
+          target: session.targetName,
+          action: "custom_asked",
+          channel: "a2a",
+          score: candidate.score,
+          offeringId: session.offeringId,
+        });
+        continue;
+      }
+
+      const channel = candidate.endpoint
+        ? "a2a"
+        : candidate.twitter && config.outreach.xPitchEnabled && xConfigured()
+          ? "x"
+          : null;
+      if (!channel) {
         summary.skipped += 1;
-        summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_fit" });
+        summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_channel" });
         continue;
       }
 
@@ -749,12 +920,14 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       });
       const sessionId = crypto.randomUUID();
       const expiresAt = Date.now() + config.outreach.sessionTtlSeconds * 1000;
+      const reviewedTasks = (candidate.tasks || []).slice(0, 8);
       const session = {
         id: sessionId,
         contextId: sessionId,
         targetKey: candidate.key,
-        targetName: candidate.name || candidate.card?.name || candidate.endpoint,
-        endpoint: candidate.endpoint,
+        targetName: candidate.name || candidate.card?.name || candidate.endpoint || candidate.twitter,
+        endpoint: candidate.endpoint || null,
+        channel,
         offeringId: offering.id,
         basePriceUsdc: offering.priceUsdc,
         priceUsdc: quoteUsdc,
@@ -775,34 +948,55 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         grounding = await deepGrounding(candidate).catch(() => null);
       }
 
-      const text = buildPitch({
-        target: candidate,
-        analysis,
-        teaser,
-        offering,
-        quoteUsdc,
-        session,
-        wallet,
-        grounding,
-      });
-      const send = await sendA2APitch({
-        endpoint: candidate.endpoint,
-        text,
-        sessionId,
-        offeringId: offering.id,
-        quoteUsdc,
-        expiresAt: session.expiresAt,
-      });
+      let send = null;
+      if (channel === "a2a") {
+        const text = buildPitch({
+          target: candidate,
+          analysis,
+          teaser,
+          offering,
+          quoteUsdc,
+          session,
+          wallet,
+          grounding,
+        });
+        send = await sendA2APitch({
+          endpoint: candidate.endpoint,
+          text,
+          sessionId,
+          offeringId: offering.id,
+          quoteUsdc,
+          expiresAt: session.expiresAt,
+          from: publicUrl.url,
+        });
+      } else {
+        const mention = buildMentionPitch({
+          target: candidate,
+          analysis,
+          offering,
+          quoteUsdc,
+          baseUrl: publicUrl.url,
+        });
+        if (!mention) {
+          summary.skipped += 1;
+          summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_handle" });
+          continue;
+        }
+        send = await sendXPitch({ handle: candidate.twitter, text: mention });
+        if (send.ok) send.text = mention;
+      }
 
       if (!send.ok) {
         summary.outcomes.push({
           target: session.targetName,
           action: "send_failed",
+          channel,
           error: send.error,
         });
         await saveContact(candidate.key, {
           targetName: session.targetName,
-          endpoint: candidate.endpoint,
+          endpoint: candidate.endpoint || null,
+          channel,
           lastOutcome: "send_failed",
           lastContactAt: nowIso(),
           nextAttemptAt: new Date(Date.now() + FAILED_SEND_BACKOFF_MS).toISOString(),
@@ -811,24 +1005,29 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         continue;
       }
 
-      await saveSession(session);
+      if (channel === "a2a") {
+        await saveSession(session);
+      }
       if (send.contextId && send.contextId !== session.id) {
         await store
           .set(
             storeHelpers.outreachSession(send.contextId),
             { ...session, contextId: send.contextId },
-            { ttlSeconds: SESSION_TTL_SECONDS }
+            { ttlSeconds: sessionTtlSeconds }
           )
           .catch(() => null);
       }
       await saveContact(candidate.key, {
         targetName: session.targetName,
-        endpoint: candidate.endpoint,
+        endpoint: candidate.endpoint || null,
+        channel,
+        twitter: candidate.twitter || null,
+        tasksReviewed: reviewedTasks,
         lastOutcome: "pitched",
         lastContactAt: nowIso(),
         nextAttemptAt: new Date(Date.now() + config.outreach.cooldownHours * 3600_000).toISOString(),
         score: candidate.score,
-        sessionId,
+        sessionId: channel === "a2a" ? sessionId : null,
       });
 
       const latest = await loadOutreachState();
@@ -843,20 +1042,25 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         offeringId: offering.id,
         priceUsdc: quoteUsdc,
         action: "pitched",
+        channel,
+        tweetUrl: send.url || null,
+        tasksReviewed: reviewedTasks.length,
         engine: analysis.engine,
         grounded: Boolean(grounding),
       });
       latest.outcomes = latest.outcomes.slice(-20);
       await saveOutreachState(latest);
-      await syncSessionSummary(session);
+      if (channel === "a2a") await syncSessionSummary(session);
 
       summary.pitched += 1;
       summary.outcomes.push({
         target: session.targetName,
         action: "pitched",
+        channel,
         offeringId: offering.id,
         priceUsdc: quoteUsdc,
         score: candidate.score,
+        tweetUrl: send.url || null,
       });
     }
 
@@ -881,14 +1085,44 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
 }
 
 export async function outreachStatus() {
-  const [state, optOuts] = await Promise.all([
+  const [state, optOuts, publicUrl, activation, intake, ai, sweep] = await Promise.all([
     loadOutreachState(),
     store.smembers(storeHelpers.outreachOptOut()).catch(() => []),
+    loadPublicUrl(),
+    activationStatus(),
+    intakeStatus().catch(() => null),
+    aiHealth().catch(() => null),
+    loadDirectorySweep(),
   ]);
   return {
     enabled: config.outreach.enabled,
     aiConfigured: aiConfigured(),
+    ai: ai
+      ? {
+          groq: ai.groq,
+          gemini: ai.gemini,
+          routing: ai.routing,
+          outbound: {
+            targetAnalysis: { primary: "groq", fallback: "gemini" },
+            pitchGrounding: { primary: "gemini", fallback: null },
+          },
+          bothEnginesReachable: Boolean(ai.groq?.reachable && ai.gemini?.reachable),
+        }
+      : null,
+    execution: {
+      walletConfigured,
+      intakeEnabled: config.intake.enabled,
+      intakeCursor: intake?.cursor ?? null,
+      intakeDriver: intake?.driver ?? null,
+      gasGatedJobs: intake?.gasGatedJobs?.length ?? 0,
+    },
     publicBaseUrlConfigured: Boolean(config.publicBaseUrl),
+    publicUrl: publicUrl.url,
+    publicUrlSource: publicUrl.source,
+    activation,
+    xConfigured: xConfigured(),
+    xPitchEnabled: config.outreach.xPitchEnabled,
+    channels: ["a2a", ...(config.outreach.xPitchEnabled && xConfigured() ? ["x"] : [])],
     driver: isVercel ? "vercel_cron" : "local_loop",
     intervalSeconds: config.outreach.intervalSeconds,
     dailyCap: config.outreach.dailyCap,
@@ -897,11 +1131,25 @@ export async function outreachStatus() {
     cooldownHours: config.outreach.cooldownHours,
     sessionTtlSeconds: config.outreach.sessionTtlSeconds,
     maxTurns: config.outreach.maxTurns,
+    customAsk: {
+      enabled: config.custom.enabled,
+      basePriceUsdc: config.custom.basePriceUsdc,
+      maxPriceUsdc: config.custom.maxPriceUsdc,
+      engines: ["groq", "gemini"],
+    },
     discovery: {
       indexUrl: config.outreach.indexUrl || null,
       indexConfigured: Boolean(config.outreach.indexToken),
       allowlistTargets: config.outreach.targets.length,
       scanJobs: config.outreach.scanJobs,
+      directoryUrl: config.outreach.directoryUrl,
+      directoryPageSize: config.outreach.directoryLimit,
+      directoryPagesPerCycle: config.outreach.directoryPages,
+      directorySweepPages: sweep.maxPages,
+      directorySweepPage: sweep.page,
+      directorySweepReported: sweep.totalPages,
+      maxCandidates: config.outreach.maxCandidates,
+      registryUrl: config.outreach.registryUrl,
     },
     state: {
       day: state.day,

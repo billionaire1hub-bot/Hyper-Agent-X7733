@@ -316,7 +316,9 @@ if (baseUrl) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const card = await response.json();
     if (card.name !== config.name) throw new Error(`name=${card.name}`);
-    if (!Array.isArray(card.skills) || card.skills.length !== 32) throw new Error("unexpected skills");
+    if (!Array.isArray(card.skills) || card.skills.length !== OFFERINGS.length) {
+      throw new Error(`unexpected skills: ${card.skills?.length} vs registry ${OFFERINGS.length}`);
+    }
     return `${card.name} v${card.version} skills=${card.skills.length}`;
   }, { critical: false });
 

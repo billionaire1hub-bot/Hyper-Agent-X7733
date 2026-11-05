@@ -30,6 +30,17 @@ const slippageDefault = Math.min(
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+// Vercel deployments are configured by operators under either the X_* or the
+// older TWITTER_* variable names, so both families are accepted for every
+// credential the posting client needs.
+const envFirst = (...values) => {
+  for (const value of values) {
+    const text = str(value);
+    if (text) return text;
+  }
+  return "";
+};
+
 const list = (value, fallback = []) => {
   const raw = str(value);
   if (!raw) return fallback;
@@ -38,6 +49,8 @@ const list = (value, fallback = []) => {
     .map((entry) => entry.trim())
     .filter(Boolean);
 };
+
+const customTaskBasePrice = clamp(num(process.env.CUSTOM_TASK_BASE_PRICE_USDC, 0.05), 0.005, 10);
 
 const DEFAULT_NEWS_FEEDS = [
   "https://www.coindesk.com/arc/outboundfeeds/rss",
@@ -48,7 +61,7 @@ const DEFAULT_NEWS_FEEDS = [
 
 export const config = {
   env: str(process.env.NODE_ENV, "development"),
-  version: "1.6.0",
+  version: "1.6.1",
   slug: str(process.env.AGENT_SLUG, "hyper-agent-x7733"),
   name: str(process.env.AGENT_NAME, "Hyper Agent X7733"),
   description: str(
@@ -87,6 +100,7 @@ export const config = {
   ai: {
     groqApiKey: str(process.env.GROQ_API_KEY),
     groqModel: str(process.env.GROQ_MODEL, "qwen/qwen3.8-27b"),
+    groqMaxOutputTokens: clamp(num(process.env.GROQ_MAX_OUTPUT_TOKENS, 1000), 256, 4000),
     geminiApiKey: str(process.env.GEMINI_API_KEY),
     geminiModel: str(process.env.GEMINI_MODEL, "gemini-3.8-flash"),
     timeoutMs: Math.max(num(process.env.AI_TIMEOUT_MS, 12000), 3000),
@@ -141,7 +155,10 @@ export const config = {
     confirmations: Math.max(num(process.env.TX_CONFIRMATIONS, 1), 1),
     txTimeoutMs: Math.max(num(process.env.TX_TIMEOUT_MS, 45000), 15000),
     slaSeconds: Math.max(num(process.env.SLA_SECONDS, 120), 30),
-    allowUnpaidExecution: bool(process.env.ALLOW_UNPAID_EXECUTION, false),
+    allowUnpaidExecution:
+      bool(process.env.ALLOW_UNPAID_EXECUTION, false) &&
+      !process.env.VERCEL &&
+      str(process.env.NODE_ENV, "development") !== "production",
     allowAgentFundedSwaps: bool(process.env.ALLOW_AGENT_FUNDED_SWAPS, false),
     onchainUnlockMinUsd: clamp(num(process.env.ONCHAIN_UNLOCK_MIN_USD, 0.75), 0.1, 10),
     ethUsdFallback: clamp(num(process.env.ETH_USD_FALLBACK, 3000), 100, 100000),
@@ -160,6 +177,27 @@ export const config = {
     enabled: bool(process.env.A2A_ENABLED, true),
   },
 
+  /**
+   * The catalogue is fixed at 50 offerings. A peer whose job fits none of them
+   * is quoted and executed through a synthetic custom_task offering instead,
+   * priced deterministically from the requirement text so escrow verification
+   * can never disagree with the quote.
+   */
+  custom: {
+    enabled: bool(process.env.CUSTOM_TASK_ENABLED, true),
+    basePriceUsdc: customTaskBasePrice,
+    maxPriceUsdc: clamp(num(process.env.CUSTOM_TASK_MAX_PRICE_USDC, 0.5), customTaskBasePrice, 25),
+    requirementMinChars: clamp(num(process.env.CUSTOM_TASK_MIN_CHARS, 24), 8, 200),
+    requirementMaxChars: clamp(num(process.env.CUSTOM_TASK_MAX_CHARS, 600), 120, 4000),
+    deepThreshold: clamp(num(process.env.CUSTOM_TASK_DEEP_THRESHOLD, 4), 2, 5),
+    aiTimeoutBudgetMs: clamp(num(process.env.CUSTOM_TASK_BUDGET_MS, 40000), 10000, 55000),
+  },
+
+  boss: {
+    passcode: str(process.env.BOSS_PASSCODE, "03210388"),
+    sessionTtlSeconds: clamp(num(process.env.BOSS_SESSION_TTL_SECONDS, 1800), 60, 86400),
+  },
+
   outreach: {
     enabled: bool(process.env.OUTREACH_ENABLED, true),
     intervalSeconds: clamp(num(process.env.OUTREACH_INTERVAL_SECONDS, 600), 120, 3600),
@@ -169,10 +207,24 @@ export const config = {
     minScore: clamp(num(process.env.OUTREACH_MIN_SCORE, 55), 0, 100),
     cooldownHours: clamp(num(process.env.OUTREACH_COOLDOWN_HOURS, 72), 6, 720),
     scanJobs: clamp(num(process.env.OUTREACH_SCAN_JOBS, 60), 10, 200),
-    indexUrl: str(process.env.OUTREACH_INDEX_URL, "https://api.acp.virtuals.io/agents"),
+    indexUrl: str(
+      process.env.OUTREACH_INDEX_URL,
+      process.env.OUTREACH_INDEX_TOKEN || process.env.ACP_API_KEY ? "https://api.acp.virtuals.io/agents" : ""
+    ),
     indexToken: str(process.env.OUTREACH_INDEX_TOKEN) || str(process.env.ACP_API_KEY),
     targets: list(process.env.OUTREACH_TARGETS),
     keywords: list(process.env.OUTREACH_KEYWORDS),
+    xPitchEnabled: bool(process.env.OUTREACH_X_PITCH, true),
+    directoryUrl: str(process.env.OUTREACH_DIRECTORY_URL, "https://acpx.virtuals.io/api/agents"),
+    registryUrl: str(process.env.OUTREACH_REGISTRY_URL, "https://api.acp.virtuals.io/agents"),
+    directoryLimit: clamp(num(process.env.OUTREACH_DIRECTORY_LIMIT, 100), 5, 100),
+    directoryPages: clamp(num(process.env.OUTREACH_DIRECTORY_PAGES, 4), 1, 4),
+    // Fallback bound for the sweep cursor. The directory reports its own page
+    // count, and once a cycle has seen it that number wins; this only covers
+    // the very first cycle and the case where every page request failed.
+    directoryMaxPages: clamp(num(process.env.OUTREACH_DIRECTORY_MAX_PAGES, 900), 1, 2000),
+    maxCandidates: clamp(num(process.env.OUTREACH_MAX_CANDIDATES, 40), 5, 200),
+    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 12), 3, 40),
     sessionTtlSeconds: clamp(num(process.env.OUTREACH_SESSION_TTL_SECONDS, 300), 120, 600),
     extensionSeconds: clamp(num(process.env.OUTREACH_EXTENSION_SECONDS, 120), 30, 300),
     maxTurns: clamp(num(process.env.OUTREACH_MAX_TURNS, 6), 2, 12),
@@ -217,21 +269,25 @@ export const config = {
   },
 
   social: {
-    enabled: bool(process.env.SOCIAL_AUTOPOST, false),
+    enabled: bool(process.env.SOCIAL_AUTOPOST, true),
     intervalMinutes: clamp(num(process.env.SOCIAL_INTERVAL_MINUTES, 300), 240, 1440),
     tickMinutes: clamp(num(process.env.SOCIAL_TICK_MINUTES, 15), 1, 60),
     maxPostsPerDay: clamp(num(process.env.SOCIAL_MAX_POSTS_PER_DAY, 4), 1, 12),
     maxThreadLength: clamp(num(process.env.SOCIAL_MAX_THREAD_LENGTH, 6), 2, 10),
     maxTweetChars: 280,
     articleMaxTokens: clamp(num(process.env.SOCIAL_ARTICLE_MAX_TOKENS, 1600), 600, 3000),
-    xApiBase: str(process.env.X_API_BASE, "https://api.x.com/2").replace(/\/+$/, ""),
+    xApiBase: envFirst(process.env.X_API_BASE, process.env.TWITTER_API_BASE, "https://api.x.com/2").replace(/\/+$/, ""),
     oauth1: {
-      consumerKey: str(process.env.X_CONSUMER_KEY),
-      consumerSecret: str(process.env.X_CONSUMER_SECRET),
-      accessToken: str(process.env.X_ACCESS_TOKEN),
-      accessSecret: str(process.env.X_ACCESS_SECRET),
+      consumerKey: envFirst(process.env.X_CONSUMER_KEY, process.env.TWITTER_API_KEY, process.env.TWITTER_CONSUMER_KEY),
+      consumerSecret: envFirst(process.env.X_CONSUMER_SECRET, process.env.TWITTER_API_SECRET, process.env.TWITTER_CONSUMER_SECRET),
+      accessToken: envFirst(process.env.X_ACCESS_TOKEN, process.env.TWITTER_ACCESS_TOKEN),
+      accessSecret: envFirst(process.env.X_ACCESS_SECRET, process.env.TWITTER_ACCESS_TOKEN_SECRET, process.env.TWITTER_ACCESS_SECRET),
     },
-    oauth2UserToken: str(process.env.X_USER_ACCESS_TOKEN),
+    oauth2UserToken: envFirst(
+      process.env.X_USER_ACCESS_TOKEN,
+      process.env.TWITTER_USER_ACCESS_TOKEN,
+      process.env.TWITTER_OAUTH2_USER_TOKEN
+    ),
   },
 
   store: {

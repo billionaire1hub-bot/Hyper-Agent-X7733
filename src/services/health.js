@@ -15,6 +15,7 @@ import { getQuote } from "./kyberswap.js";
 import { getVirtualsAssetToken } from "./virtuals.js";
 import { aiHealth } from "./ai.js";
 import { offeringsPublicJSON } from "./offerings.js";
+import { customCapabilityJSON } from "./custom.js";
 import { probeDataProviders } from "./market.js";
 import { gasUnlockStatus } from "./gas.js";
 import { socialStatus } from "./social.js";
@@ -350,9 +351,11 @@ async function collect() {
       ...offering,
       ready: Boolean(readiness[offering.offering_id]),
     })),
+    customTask: customCapabilityJSON(),
     endpoints: {
       health: { method: "GET", path: "/api/health" },
       offerings: { method: "GET", path: "/api/offerings" },
+      custom: { method: "GET", path: "/api/custom" },
       chat: { method: "POST", path: "/api/chat" },
       acp: { method: "POST", path: "/api/acp" },
       jobStatus: { method: "GET", path: "/api/jobs/:jobId" },

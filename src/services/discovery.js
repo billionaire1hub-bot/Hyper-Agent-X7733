@@ -173,6 +173,152 @@ export async function fetchIndex({ url = config.outreach.indexUrl, token = confi
   return { agents: normalizeIndexPayload(payload), url: target.base };
 }
 
+/**
+ * The tasks an agent publishes are the jobs and offerings it sells. They are
+ * what the outreach analyst reviews before choosing an offer to pitch.
+ */
+export function agentTasks(entry) {
+  const offerings = Array.isArray(entry?.offerings) ? entry.offerings : [];
+  const jobs = Array.isArray(entry?.jobs) ? entry.jobs : [];
+  const fromOfferings = offerings.map((offering) => ({
+    name: String(offering?.name || "").slice(0, 120),
+    description: String(offering?.description || "").slice(0, 240),
+    price: offering?.price ?? offering?.priceValue ?? null,
+    slaMinutes: offering?.slaMinutes ?? null,
+  }));
+  const fromJobs = jobs.map((job) => ({
+    name: String(job?.name || "").slice(0, 120),
+    description: String(job?.description || "").slice(0, 240),
+    price: job?.price ?? null,
+    slaMinutes: job?.slaMinutes ?? null,
+  }));
+  return [...fromOfferings, ...fromJobs].filter((task) => task.name).slice(0, 12);
+}
+
+const chainIdsOf = (entry) => {
+  const chains = Array.isArray(entry?.enabledChains)
+    ? entry.enabledChains.map((chain) => Number(chain?.id)).filter(Number.isFinite)
+    : [];
+  const registryChains = Array.isArray(entry?.chains)
+    ? entry.chains.map((chain) => Number(chain?.chainId)).filter(Number.isFinite)
+    : [];
+  return [...new Set([...chains, ...registryChains])];
+};
+
+const twitterHandleOf = (entry) => {
+  const handle = firstString(entry?.twitterHandle, entry?.memeTwitterHandle);
+  if (!handle) return null;
+  const clean = handle.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,15}$/.test(clean) ? clean : null;
+};
+
+/**
+ * The public Virtuals Protocol directory. It needs no key and lists the live
+ * agents with the tasks they publish, their category, their chains and their
+ * social handle, which is the raw material the outreach cycle reviews.
+ */
+export function normalizeDirectoryAgent(entry) {
+  const name = firstString(entry?.name, entry?.agentName, entry?.title, entry?.id);
+  const address = firstString(entry?.walletAddress, entry?.wallet, entry?.address);
+  const chains = chainIdsOf(entry);
+  const resources = (Array.isArray(entry?.resources) ? entry.resources : [])
+    .map((resource) => firstString(resource?.url, resource))
+    .filter(Boolean)
+    .slice(0, 10);
+  return {
+    source: "virtuals_directory",
+    name: name || null,
+    description: firstString(entry?.description, entry?.goal, entry?.tagline),
+    url: resources.find((resource) => isPublicHttpUrl(resource)) || null,
+    address: isAddressLike(address) ? address : null,
+    category: firstString(entry?.category, entry?.role, entry?.tag),
+    tags: asList(entry?.categories).concat(asList(entry?.capabilities)).slice(0, 20),
+    skills: [],
+    tasks: agentTasks(entry),
+    twitter: twitterHandleOf(entry),
+    chainIds: chains,
+    successRate: Number.isFinite(Number(entry?.successRate)) ? Number(entry.successRate) : null,
+    totalJobs: Number(entry?.totalJobCount || 0) || null,
+    completedJobs: Number(entry?.successfulJobCount || 0) || null,
+    uniqueBuyers: Number(entry?.uniqueBuyerCount || 0) || null,
+    volumeUsd: Number(entry?.grossAgenticAmount ?? entry?.revenue ?? 0) || null,
+    lastActiveAt: firstString(entry?.lastActiveAt),
+    resources,
+    activity: null,
+    card: null,
+    endpoint: null,
+    score: 0,
+    reasons: [],
+  };
+}
+
+export async function fetchVirtualsDirectoryPage({
+  limit = config.outreach.directoryLimit,
+  url = config.outreach.directoryUrl,
+  page = 1,
+  chainId = config.chain.id,
+} = {}) {
+  const target = normalizeUrl(url);
+  if (!target) throw new Error("OUTREACH_DIRECTORY_URL must be a public HTTPS URL");
+  const size = Math.max(1, Math.min(100, Number(limit) || 50));
+  const separator = target.base.includes("?") ? "&" : "?";
+  const pageNumber = Math.max(1, Number(page) || 1);
+  const payload = await fetchJSON(
+    `${target.base}${separator}pagination[page]=${pageNumber}&pagination[pageSize]=${size}`,
+    {},
+    { timeoutMs: 8000, retries: 2, service: "virtuals-directory" }
+  );
+  const container = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  const agents = container
+    .map(normalizeDirectoryAgent)
+    .filter((agent) => agent.name)
+    .filter((agent) => !agent.chainIds.length || agent.chainIds.includes(Number(chainId)));
+  // The directory reports its own size, so the sweep bound comes from the
+  // network rather than from a constant we could get wrong.
+  const reported = Number(payload?.meta?.pagination?.pageCount ?? payload?.pageCount ?? payload?.totalPages);
+  return {
+    agents,
+    page: Number(payload?.meta?.pagination?.page) || pageNumber,
+    pageCount: Number.isFinite(reported) && reported >= 1 ? Math.trunc(reported) : null,
+    total: Number(payload?.meta?.pagination?.total ?? payload?.total) || null,
+  };
+}
+
+export async function fetchVirtualsDirectory(options = {}) {
+  const { agents } = await fetchVirtualsDirectoryPage(options);
+  return agents;
+}
+
+/**
+ * The public ACP registry resolves one agent by wallet address and returns the
+ * same profile plus the resources and offerings the agent publishes.
+ */
+export async function fetchRegistryAgent(walletAddress, { url = config.outreach.registryUrl } = {}) {
+  const target = normalizeUrl(url);
+  const address = firstString(walletAddress);
+  if (!target || !isAddressLike(address)) return null;
+  const payload = await fetchJSON(
+    `${target.base}/wallet/${address}`,
+    {},
+    { timeoutMs: 8000, retries: 0, service: "acp-registry" }
+  );
+  const data = payload?.data;
+  if (!data || typeof data !== "object") return null;
+  return {
+    id: firstString(data.id),
+    name: firstString(data.name),
+    description: firstString(data.description),
+    address: isAddressLike(data.walletAddress) ? data.walletAddress : address,
+    tasks: agentTasks(data),
+    resources: (Array.isArray(data.resources) ? data.resources : [])
+      .map((resource) => firstString(resource?.url))
+      .filter(Boolean)
+      .slice(0, 10),
+    chainIds: chainIdsOf(data),
+    lastActiveAt: firstString(data.lastActiveAt),
+  };
+}
+
 function deriveEndpoint(input, card) {
   const declared = firstString(card?.url);
   if (declared) {
@@ -281,6 +427,7 @@ export function scoreTarget(target, { activity = null, counter = null, now = Dat
     ...(target.tags || []),
     ...(target.skills || []),
     ...(activity?.descriptions || []),
+    ...(target.tasks || []).map((task) => `${task.name} ${task.description || ""}`),
   ]
     .filter(Boolean)
     .join(" ")
@@ -335,12 +482,77 @@ export function scoreTarget(target, { activity = null, counter = null, now = Dat
     }
   }
 
+  // The directory and the ACP registry publish each agent's own settlement
+  // history. That is live counterparty evidence: an agent that completes jobs,
+  // keeps buyers and moves volume already knows how escrow works and can fund a
+  // pitch, which on-chain scanning alone cannot show for agents outside the
+  // recent job window.
+  let trackPoints = 0;
+  const settled = Math.max(Number(target.completedJobs) || 0, Number(target.totalJobs) || 0);
+  if (settled) {
+    trackPoints += settled >= 1000 ? 12 : settled >= 100 ? 8 : settled >= 10 ? 5 : 2;
+    reasons.push(`acp-settled:${settled}`);
+  }
+  const successRate = Number(target.successRate);
+  if (Number.isFinite(successRate) && successRate > 0) {
+    const pct = successRate <= 1 ? successRate * 100 : successRate;
+    if (pct >= 80) {
+      trackPoints += 4;
+      reasons.push(`acp-success:${Math.round(pct)}%`);
+    }
+  }
+  const buyers = Number(target.uniqueBuyers) || 0;
+  if (buyers >= 25) {
+    trackPoints += 4;
+    reasons.push(`acp-buyers:${buyers}`);
+  } else if (buyers >= 5) {
+    trackPoints += 2;
+    reasons.push(`acp-buyers:${buyers}`);
+  }
+  const volume = Number(target.volumeUsd) || 0;
+  if (volume >= 1000) {
+    trackPoints += 5;
+    reasons.push("acp-volume:>=$1k");
+  } else if (volume >= 100) {
+    trackPoints += 3;
+    reasons.push("acp-volume:>=$100");
+  } else if (volume >= 10) {
+    trackPoints += 1;
+    reasons.push("acp-volume:>=$10");
+  }
+  const lastActiveMs = Date.parse(String(target.lastActiveAt || ""));
+  if (Number.isFinite(lastActiveMs)) {
+    const daysSince = (now - lastActiveMs) / 86_400_000;
+    if (daysSince >= 0 && daysSince <= 30) {
+      trackPoints += 5;
+      reasons.push("acp-active:<30d");
+    } else if (daysSince > 180) {
+      trackPoints -= 6;
+      reasons.push("acp-dormant:>180d");
+    }
+  }
+  score += Math.max(-6, Math.min(25, trackPoints));
+
   if (target.endpoint) {
     score += 10;
     reasons.push("a2a:endpoint");
   }
   if (target.address) {
     score += 3;
+  }
+  if (target.twitter) {
+    score += 4;
+    reasons.push("channel:x");
+  }
+  const taskOverlap = INTEL_OFFERINGS.filter((offering) => {
+    const haystack = (target.tasks || [])
+      .map((task) => `${task.name} ${task.description || ""}`.toLowerCase())
+      .join(" ");
+    return haystack.includes(offering.id) || haystack.includes(offering.name.toLowerCase());
+  }).length;
+  if (taskOverlap) {
+    score += Math.min(taskOverlap * 4, 12);
+    reasons.push(`tasks:${taskOverlap}`);
   }
 
   const value = Math.max(0, Math.min(100, Math.round(score)));
@@ -376,6 +588,22 @@ const isSelf = (target) => {
 };
 
 /**
+ * Pages for one sweep step: `count` consecutive pages starting at `start`,
+ * wrapping inside `1..max`. The caller persists the next start (and the page
+ * count the directory itself reported), so successive cycles keep walking the
+ * whole directory instead of re-reading a fixed subset.
+ */
+export function directoryPageRange({ start = null, count = 1, max = 1, now = Date.now() } = {}) {
+  const total = Math.min(Math.max(1, Number(max) || 1), 2000);
+  const size = Math.min(Math.max(1, Number(count) || 1), 4);
+  const fallback = 1 + (Math.floor(now / (5 * 60 * 1000)) % total);
+  const first = Math.min(Math.max(1, Number(start) || fallback), total);
+  const pages = [];
+  for (let step = 0; step < size; step += 1) pages.push(((first - 1 + step) % total) + 1);
+  return pages;
+}
+
+/**
  * Merges allowlisted targets, an optional authenticated index and recent
  * on-chain ACP participants, fetches a bounded number of live agent cards, and
  * returns scored candidates. Never throws: source failures are reported.
@@ -385,8 +613,11 @@ export async function discoverTargets({
   indexUrl = config.outreach.indexUrl,
   indexToken = config.outreach.indexToken,
   targets = config.outreach.targets,
-  cardLimit = 6,
+  cardLimit = config.outreach.cardProbes,
   now = Date.now(),
+  directoryPage = null,
+  directoryPages = config.outreach.directoryPages,
+  directoryMaxPages = config.outreach.directoryMaxPages,
 } = {}) {
   const errors = [];
   const collected = [];
@@ -402,6 +633,9 @@ export async function discoverTargets({
       address: null,
       tags: [],
       skills: [],
+      tasks: [],
+      twitter: null,
+      chainIds: [],
       activity: null,
       card: null,
       endpoint: null,
@@ -417,6 +651,42 @@ export async function discoverTargets({
     } catch (error) {
       errors.push({ source: "index", code: error.code || "OUTREACH_INDEX_FAILED", message: error.message });
     }
+  }
+
+  let directoryAgents = 0;
+  let directoryPageCount = null;
+  let directoryTotal = null;
+  // The directory reports tens of thousands of agents, so one cycle reads a run
+  // of consecutive pages and the caller stores where the next cycle continues.
+  // The sweep walks the whole network instead of being stuck on a static
+  // subset. Pages are fetched in parallel to stay inside the cycle budget.
+  const pages = directoryPageRange({
+    start: directoryPage,
+    count: directoryPages,
+    max: directoryMaxPages,
+    now,
+  });
+  const directoryResults = await Promise.allSettled(
+    pages.map((page) => fetchVirtualsDirectoryPage({ page }))
+  );
+  for (const [index, outcome] of directoryResults.entries()) {
+    if (outcome.status === "fulfilled") {
+      directoryAgents += outcome.value.agents.length;
+      collected.push(...outcome.value.agents);
+      if (outcome.value.pageCount) {
+        directoryPageCount = Math.max(directoryPageCount || 0, outcome.value.pageCount);
+      }
+      if (outcome.value.total) {
+        directoryTotal = Math.max(directoryTotal || 0, outcome.value.total);
+      }
+      continue;
+    }
+    errors.push({
+      source: "directory",
+      page: pages[index],
+      code: outcome.reason?.code || "OUTREACH_DIRECTORY_FAILED",
+      message: outcome.reason?.message || "directory fetch failed",
+    });
   }
 
   let onchain = { agents: [], counter: null, scanned: 0 };
@@ -443,6 +713,9 @@ export async function discoverTargets({
     if (existing) {
       existing.tags = [...new Set([...(existing.tags || []), ...(agent.tags || [])])];
       existing.skills = [...new Set([...(existing.skills || []), ...(agent.skills || [])])];
+      existing.tasks = [...(existing.tasks || []), ...(agent.tasks || [])].slice(0, 12);
+      existing.chainIds = [...new Set([...(existing.chainIds || []), ...(agent.chainIds || [])])];
+      existing.twitter = existing.twitter || agent.twitter || null;
       existing.description = existing.description || agent.description;
       existing.url = existing.url || agent.url;
       existing.source = existing.source === agent.source ? existing.source : `${existing.source}+${agent.source}`;
@@ -464,6 +737,9 @@ export async function discoverTargets({
       address: activity.address,
       tags: [],
       skills: [],
+      tasks: [],
+      twitter: null,
+      chainIds: [],
       activity,
       card: null,
       endpoint: null,
@@ -479,6 +755,25 @@ export async function discoverTargets({
     candidate.score = prelim.score;
     candidate.reasons = prelim.reasons;
   }
+
+  // The public ACP registry resolves an agent by wallet address, which turns an
+  // anonymous on-chain participant into a named agent with published tasks.
+  const registryTargets = candidates
+    .filter((candidate) => candidate.address && !candidate.name)
+    .slice(0, 8);
+  await Promise.allSettled(
+    registryTargets.map(async (candidate) => {
+      const profile = await fetchRegistryAgent(candidate.address);
+      if (!profile) return;
+      candidate.name = profile.name || candidate.name;
+      candidate.description = candidate.description || profile.description;
+      candidate.tasks = profile.tasks.length ? profile.tasks : candidate.tasks;
+      candidate.chainIds = profile.chainIds.length ? profile.chainIds : candidate.chainIds;
+      candidate.lastActiveAt = profile.lastActiveAt || candidate.lastActiveAt;
+      candidate.registryId = profile.id || null;
+      candidate.resources = profile.resources;
+    })
+  );
 
   const fetchable = candidates
     .filter((candidate) => candidate.url)
@@ -505,16 +800,30 @@ export async function discoverTargets({
     })
   );
 
+  // A published resource URL only becomes a pitch channel once its agent card
+  // answers. Until then the operator allowlist stays the single trusted source
+  // of an endpoint that was never probed, so a pitch can never be posted at a
+  // marketing page or a dead host.
+  for (const candidate of candidates) {
+    if (candidate.endpoint && !candidate.card && !String(candidate.source).includes("allowlist")) {
+      candidate.endpoint = null;
+    }
+  }
+
   const scored = candidates
     .filter((candidate) => !isSelf(candidate))
     .map((candidate) => {
       const result = scoreTarget(candidate, { activity: candidate.activity, counter: onchain.counter, now });
+      const channels = [];
+      if (candidate.endpoint && isPublicHttpUrl(candidate.endpoint)) channels.push("a2a");
+      if (candidate.twitter) channels.push("x");
       return {
         ...candidate,
         key: targetKey(candidate),
         score: result.score,
         reasons: result.reasons,
-        contactable: Boolean(candidate.endpoint && isPublicHttpUrl(candidate.endpoint)),
+        channels,
+        contactable: channels.length > 0,
       };
     })
     .sort((a, b) => b.score - a.score);
@@ -522,6 +831,9 @@ export async function discoverTargets({
   logger.info("outreach discovery finished", {
     allowlist: targets.length,
     index: indexAgents,
+    directory: directoryAgents,
+    directoryPages: pages.join(","),
+    directorySweepPages: directoryPageCount || directoryMaxPages,
     onchain: onchain.agents.length,
     candidates: scored.length,
     contactable: scored.filter((candidate) => candidate.contactable).length,
@@ -533,6 +845,11 @@ export async function discoverTargets({
     sources: {
       allowlist: targets.length,
       index: indexAgents,
+      directory: directoryAgents,
+      directoryPages: pages,
+      directorySweepPages: directoryPageCount,
+      directoryTotal: directoryTotal,
+      nextPage: (pages[pages.length - 1] % Math.max(1, Number(directoryMaxPages) || 1)) + 1,
       onchain: onchain.agents.length,
       jobsScanned: onchain.scanned,
       counter: onchain.counter,

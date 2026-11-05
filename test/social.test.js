@@ -7,6 +7,7 @@ process.env.X_ACCESS_TOKEN = "test-access-token";
 process.env.X_ACCESS_SECRET = "test-access-secret";
 process.env.SOCIAL_AUTOPOST = "false";
 
+const { config } = await import("../src/config.js");
 const { buildOAuth1Header, oauth1Configured, percentEncode, xConfigured } = await import("../src/services/x.js");
 const {
   ARTICLE_THEMES,
@@ -17,7 +18,14 @@ const {
   trimTweet,
   validateArticleNumbers,
 } = await import("../src/services/articles.js");
-const { checkAgentIdle, dailyCount, nextRunAt, runSocialCycle } = await import("../src/services/social.js");
+const {
+  checkAgentIdle,
+  dailyCount,
+  nextRunAt,
+  runSocialCycle,
+  socialPublishDue,
+  xDiagnostics,
+} = await import("../src/services/social.js");
 
 const facts = {
   generatedAt: "2026-10-29T10:00:00.000Z",
@@ -130,4 +138,34 @@ test("scheduler math and idle gate behave without side effects", async () => {
   const disabled = await runSocialCycle({ reason: "test" });
   assert.equal(disabled.status, "disabled");
   assert.equal(disabled.reason, "SOCIAL_AUTOPOST is false");
+});
+
+test("X diagnostics identify configured slots without exposing credentials", () => {
+  const diagnostics = xDiagnostics();
+  assert.equal(diagnostics.configured, true);
+  assert.equal(diagnostics.mode, "oauth1");
+  assert.equal(diagnostics.oauth1Complete, true);
+  assert.deepEqual(diagnostics.missing, ["X_USER_ACCESS_TOKEN (or TWITTER_USER_ACCESS_TOKEN)"]);
+  assert.equal(JSON.stringify(diagnostics).includes("test-consumer-key"), false);
+});
+
+test("social due gate enforces enablement, interval and daily cap", () => {
+  const now = Date.parse("2026-10-29T16:00:00Z");
+  assert.equal(socialPublishDue({}, now).reason, "SOCIAL_AUTOPOST is false");
+
+  config.social.enabled = true;
+  const groqApiKey = config.ai.groqApiKey;
+  const geminiApiKey = config.ai.geminiApiKey;
+  config.ai.groqApiKey = "test-groq-key";
+  try {
+    assert.deepEqual(socialPublishDue({}, now), { due: true });
+    const recent = { lastAttemptAt: "2026-10-29T14:00:00.000Z", day: "2026-10-29", dayCount: 1 };
+    assert.equal(socialPublishDue(recent, now).reason, "INTERVAL_NOT_ELAPSED");
+    const capped = { lastAttemptAt: "2026-10-29T01:00:00.000Z", day: "2026-10-29", dayCount: 4 };
+    assert.equal(socialPublishDue(capped, now).reason, "DAILY_CAP_REACHED");
+  } finally {
+    config.social.enabled = false;
+    config.ai.groqApiKey = groqApiKey;
+    config.ai.geminiApiKey = geminiApiKey;
+  }
 });

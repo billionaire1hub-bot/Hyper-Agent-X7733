@@ -229,6 +229,48 @@ export async function runSocialCycle({ reason = "interval", force = false } = {}
   }
 }
 
+/**
+ * Reports exactly which credential slots are empty so an operator can see
+ * what is missing instead of a generic "X_NOT_CONFIGURED".
+ */
+export function xDiagnostics() {
+  const { oauth1, oauth2UserToken } = config.social;
+  const slots = [
+    { name: "X_CONSUMER_KEY (or TWITTER_API_KEY)", filled: Boolean(oauth1.consumerKey) },
+    { name: "X_CONSUMER_SECRET (or TWITTER_API_SECRET)", filled: Boolean(oauth1.consumerSecret) },
+    { name: "X_ACCESS_TOKEN (or TWITTER_ACCESS_TOKEN)", filled: Boolean(oauth1.accessToken) },
+    { name: "X_ACCESS_SECRET (or TWITTER_ACCESS_TOKEN_SECRET)", filled: Boolean(oauth1.accessSecret) },
+    { name: "X_USER_ACCESS_TOKEN (or TWITTER_USER_ACCESS_TOKEN)", filled: Boolean(oauth2UserToken) },
+  ];
+  const missing = slots.filter((slot) => !slot.filled).map((slot) => slot.name);
+  return {
+    mode: oauth1Configured() ? "oauth1" : oauth2UserConfigured() ? "oauth2-user" : "none",
+    configured: xConfigured(),
+    slots,
+    missing,
+    oauth1Complete: Boolean(oauth1.consumerKey && oauth1.consumerSecret && oauth1.accessToken && oauth1.accessSecret),
+  };
+}
+
+/**
+ * True when a publish is due under the interval and daily-cap gates. Cron
+ * routes use it to opportunistically publish without forcing extra posts.
+ */
+export function socialPublishDue(state, now = Date.now()) {
+  if (!config.social.enabled) return { due: false, reason: "SOCIAL_AUTOPOST is false" };
+  if (!aiConfigured()) return { due: false, reason: "AI_NOT_CONFIGURED" };
+  if (!xConfigured()) return { due: false, reason: "X_NOT_CONFIGURED", missing: xDiagnostics().missing };
+  const publishedToday = dailyCount(state, new Date(now));
+  if (publishedToday >= config.social.maxPostsPerDay) {
+    return { due: false, reason: "DAILY_CAP_REACHED", publishedToday };
+  }
+  const due = Date.parse(nextRunAt(state, config.social.intervalMinutes, now));
+  if (Number.isFinite(due) && now < due) {
+    return { due: false, reason: "INTERVAL_NOT_ELAPSED", nextRunAt: new Date(due).toISOString() };
+  }
+  return { due: true };
+}
+
 export async function socialStatus({ verify = false } = {}) {
   let state = emptyState();
   try {
@@ -247,6 +289,7 @@ export async function socialStatus({ verify = false } = {}) {
     x: {
       configured: xConfigured(),
       mode: oauth1Configured() ? "oauth1" : oauth2UserConfigured() ? "oauth2-user" : "none",
+      diagnostics: xDiagnostics(),
     },
     lastAttemptAt: state.lastAttemptAt,
     lastPublishedAt: state.lastPublishedAt,

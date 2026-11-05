@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import { isAddress } from "viem";
-import { config } from "../config.js";
+import { config, walletConfigured } from "../config.js";
+import { getAgentAddress } from "../chain/client.js";
 import { helpText, parseIntent } from "./ai.js";
+import { customCapabilityJSON, customInboundReply } from "./custom.js";
 import { getAcpJob } from "./escrow.js";
 import { recordInbound } from "./inbox.js";
 import { getJobRecord } from "./jobs.js";
@@ -49,6 +51,9 @@ function acpExtension() {
       paymentToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       currency: "USDC",
       discovery: "provider job intake via jobCounter + getJob",
+      // Advertised as extension metadata only: custom work is not a registered
+      // skill, so the agent card keeps exactly one skill per real offering.
+      customTask: customCapabilityJSON(),
     },
   };
 }
@@ -279,10 +284,11 @@ async function handleMessage(id, params, deps) {
 
   const intent = parsed?.intent || { action: "help", offeringId: null, params: {}, reply: null };
   if (!intent.offeringId || intent.action === "help") {
+    const custom = customInboundReply({ text, wallet: walletConfigured ? getAgentAddress() : null });
     await recordInbound({
       text,
       contextId,
-      action: "help",
+      action: custom ? "custom" : "help",
       engine: parsed?.engine || "fallback",
       latencyMs: Date.now() - startedAt,
     });
@@ -295,8 +301,8 @@ async function handleMessage(id, params, deps) {
         messageId: crypto.randomUUID(),
         contextId,
         taskId,
-        parts: [{ kind: "text", text: intent.reply || helpText() }],
-        metadata: { engine: parsed?.engine || "fallback" },
+        parts: [{ kind: "text", text: custom?.text || intent.reply || helpText() }],
+        metadata: { engine: parsed?.engine || "fallback", ...(custom ? { offeringId: "custom_task" } : {}) },
       },
     };
   }

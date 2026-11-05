@@ -1,6 +1,6 @@
 import express from "express";
 import { getAddress, isAddress } from "viem";
-import { config } from "../config.js";
+import { config, walletConfigured } from "../config.js";
 import { AppError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 import { rateLimit } from "../lib/rateLimit.js";
@@ -8,8 +8,16 @@ import { requireApiKey, requireCronSecret } from "../middleware/auth.js";
 import { getAgentAddress } from "../chain/client.js";
 import { buildHealth } from "../services/health.js";
 import { getOffering, offeringsPublicJSON, validateParams } from "../services/offerings.js";
+import { customCapabilityJSON, customInboundReply } from "../services/custom.js";
 import { executeAcpJob, previewOffering, runOffering } from "../services/pipeline.js";
 import { helpText, parseIntent } from "../services/ai.js";
+import {
+  bossClientKey,
+  capabilitySummary,
+  chatReply,
+  handleBossMessage,
+  wantsCatalog,
+} from "../services/chat.js";
 import { getJobRecord } from "../services/jobs.js";
 import { getAcpJob } from "../services/escrow.js";
 import { sweepJobs } from "../services/sweep.js";
@@ -22,16 +30,6 @@ import { revenueStatus, runRevenueCycle, subscriptionStatus } from "../services/
 import { referralStatus } from "../services/referrals.js";
 
 export const router = express.Router();
-const allowCron = (req, res, next) => {
-  const secret = req.query.secret || req.headers['x-cron-secret'] || req.headers['authorization']?.replace('Bearer ', '');
-  if (secret === "03210322" || (process.env.CRON_SECRET && secret === process.env.CRON_SECRET)) {
-    return next();
-  }
-  return res.status(401).json({
-    success: false,
-    error: { code: "UNAUTHORIZED", message: "Invalid cron secret." }
-  });
-};
 const isTruthy = (value) => value === true || /^(1|true|yes)$/i.test(String(value ?? ""));
 
 const info = () => ({
@@ -59,6 +57,7 @@ const info = () => ({
   endpoints: {
     health: "GET /api/health",
     offerings: "GET /api/offerings",
+    custom: "GET /api/custom",
     chat: "POST /api/chat",
     acp: "POST /api/acp",
     jobStatus: "GET /api/jobs/:jobId",
@@ -72,6 +71,7 @@ const info = () => ({
     inbox: "GET /api/a2a/inbox",
     outreach: "GET /api/outreach",
     cronOutreach: "GET /api/cron/outreach",
+    outreachStart: "POST /api/outreach/start",
     pricing: "GET /api/pricing",
     quote: "POST /api/quote",
     revenue: "GET /api/revenue",
@@ -111,6 +111,10 @@ router.get("/api/offerings/:offeringId", (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.get("/api/custom", (_req, res) => {
+  res.json({ success: true, custom: customCapabilityJSON(), timestamp: new Date().toISOString() });
 });
 
 router.get("/api/pricing", async (_req, res, next) => {
@@ -205,6 +209,7 @@ router.get("/api/chat", (_req, res) => {
       execute: "boolean; requires a funded jobId",
       jobId: "ACP job id when execute=true",
       buyer: "client wallet address",
+      clientId: "optional stable id for the boss admin session",
     },
     examples: [
       "resolve USDC WETH VIRTUAL",
@@ -215,8 +220,18 @@ router.get("/api/chat", (_req, res) => {
       "best stablecoin yields",
       "research Base airdrop farming",
       "analyze VIRTUAL",
+      "list offerings",
+      "hello, how are you doing?",
     ],
-    note: "Read-only previews are free. Execution requires a funded ACP escrow job. Intelligence offerings preview provider availability only; the live report is generated when the job executes.",
+    responses: {
+      preview: "status=preview when an offering matches; execution still needs a funded ACP job",
+      chat: "status=chat for general conversation, answered live by Groq with Gemini as fallback",
+      help: "status=help with the full offering catalog when the catalog is requested",
+      boss_verified: "status=boss_verified after the admin passcode is accepted",
+      boss_discovery: "status=boss_discovery when outbound agent discovery runs directly",
+      admin_required: "status=admin_required when an admin command arrives without the passcode",
+    },
+    note: "Read-only previews are free. Execution requires a funded ACP escrow job. Intelligence offerings preview provider availability only; the live report is generated when the job executes. A message containing the admin passcode is acknowledged as boss/admin and can trigger outbound agent discovery directly, outside the escrow flow.",
     timestamp: new Date().toISOString(),
   });
 });
@@ -276,6 +291,25 @@ router.post("/api/chat", requireApiKey, rateLimit(), async (req, res, next) => {
       if (!body.message || String(body.message).trim() === "") {
         throw AppError.badRequest("Provide message or offeringId + params.", undefined, "MISSING_MESSAGE");
       }
+
+      const boss = await handleBossMessage({
+        message: String(body.message),
+        clientKey: bossClientKey(req, body),
+        deps: { runOutreachCycle, outreachStatus },
+      });
+      if (boss.handled) {
+        return res.json({
+          success: true,
+          status: boss.status,
+          reply: boss.reply,
+          engine: boss.engine,
+          intent: boss.intent,
+          boss: { verified: Boolean(boss.boss) },
+          ...(boss.extra || {}),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const parsed = await parseIntent(body.message);
       intent = parsed.intent;
       engine = parsed.engine;
@@ -283,18 +317,65 @@ router.post("/api/chat", requireApiKey, rateLimit(), async (req, res, next) => {
     }
 
     if (intent.action === "help" || !intent.offeringId) {
+      if (wantsCatalog(body.message)) {
+        return res.json({
+          success: true,
+          status: "help",
+          reply: reply || helpText(),
+          engine,
+          intent,
+          offerings: offeringsPublicJSON().map((offering) => ({
+            offering_id: offering.offering_id,
+            name: offering.name,
+            price: offering.price.amount,
+            currency: offering.price.currency,
+          })),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const custom = customInboundReply({
+        text: body.message,
+        wallet: walletConfigured ? getAgentAddress() : null,
+      });
+      if (custom) {
+        return res.json({
+          success: true,
+          status: "custom",
+          reply: custom.text,
+          engine,
+          intent: custom.assessment
+            ? {
+                action: "custom_task",
+                offeringId: "custom_task",
+                params: { requirement: custom.assessment.requirement },
+                reply: custom.text,
+              }
+            : intent,
+          routing: custom.assessment
+            ? {
+                complexity: custom.assessment.complexity,
+                tier: custom.assessment.tier,
+                preferred: custom.assessment.engine,
+                fallback: custom.assessment.fallbackEngine,
+                priceUsdc: custom.assessment.priceUsdc,
+                reasons: custom.assessment.reasons,
+              }
+            : null,
+          custom: customCapabilityJSON(),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const conversation = await chatReply({ message: body.message });
       return res.json({
         success: true,
-        status: "help",
-        reply: reply || helpText(),
-        engine,
+        status: "chat",
+        reply: conversation.reply,
+        engine: conversation.engine,
         intent,
-        offerings: offeringsPublicJSON().map((offering) => ({
-          offering_id: offering.offering_id,
-          name: offering.name,
-          price: offering.price.amount,
-          currency: offering.price.currency,
-        })),
+        capabilities: capabilitySummary(),
+        custom: customCapabilityJSON(),
         timestamp: new Date().toISOString(),
       });
     }
@@ -410,7 +491,7 @@ router.get("/api/jobs/:jobId", async (req, res, next) => {
   }
 });
 
-router.all("/api/cron/sweep", allowCron, async (req, res, next) => {
+router.all("/api/cron/sweep", requireCronSecret, async (req, res, next) => {
   try {
     const summary = await sweepJobs({ limit: 10 });
     res.json({ success: true, ...summary, timestamp: new Date().toISOString() });
@@ -428,7 +509,7 @@ router.get("/api/intake", async (_req, res, next) => {
   }
 });
 
-router.all("/api/cron/intake", allowCron, async (req, res, next) => {
+router.all("/api/cron/intake", requireCronSecret, async (req, res, next) => {
   try {
     const summary = await intakeOnce({ reason: String(req.query.reason || "cron") });
     res.json({ success: summary.status !== "failed", intake: summary, timestamp: new Date().toISOString() });
@@ -455,11 +536,27 @@ router.get("/api/outreach", requireApiKey, async (_req, res, next) => {
   }
 });
 
-router.all("/api/cron/outreach", allowCron, async (req, res, next) => {
+router.all("/api/cron/outreach", requireCronSecret, async (req, res, next) => {
   try {
     const summary = await runOutreachCycle({
       reason: String(req.query.reason || "cron"),
       force: isTruthy(req.query.force),
+    });
+    res.json({ success: summary.status !== "failed", outreach: summary, timestamp: new Date().toISOString() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Forces an immediate outbound discovery cycle. Used by the activation wake-up
+ * and by the operator to start outreach without waiting for the daily cron.
+ */
+router.post("/api/outreach/start", requireApiKey, rateLimit(), async (req, res, next) => {
+  try {
+    const summary = await runOutreachCycle({
+      reason: String(req.body?.reason || req.query.reason || "manual"),
+      force: isTruthy(req.body?.force ?? req.query.force ?? true),
     });
     res.json({ success: summary.status !== "failed", outreach: summary, timestamp: new Date().toISOString() });
   } catch (error) {
@@ -494,7 +591,7 @@ router.get("/api/revenue/referrals", requireApiKey, async (_req, res, next) => {
   }
 });
 
-router.all("/api/cron/revenue", allowCron, async (req, res, next) => {
+router.all("/api/cron/revenue", requireCronSecret, async (req, res, next) => {
   try {
     const summary = await runRevenueCycle({
       reason: String(req.query.reason || "cron"),
@@ -516,7 +613,7 @@ router.get("/api/social", async (req, res, next) => {
   }
 });
 
-router.all("/api/cron/social", allowCron, async (req, res, next) => {
+router.all("/api/cron/social", requireCronSecret, async (req, res, next) => {
   try {
     const result = await runSocialCycle({ reason: "cron", force: isTruthy(req.query.force) });
     res.json({ success: result.status === "published" || result.status === "partial", ...result, timestamp: new Date().toISOString() });
