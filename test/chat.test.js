@@ -97,7 +97,7 @@ test("a bare status command without the passcode asks for the passcode", async (
 
 test("a verified session returns the live status", async () => {
   const clientKey = "client-status-session";
-  await handleBossMessage({ message: "03210388", clientKey, deps: { askText: cannedAsk } });
+  await handleBossMessage({ message: "03210388 hello", clientKey, deps: { askText: cannedAsk } });
   const result = await handleBossMessage({
     message: "status",
     clientKey,
@@ -117,17 +117,32 @@ test("a verified session returns the live status", async () => {
   assert.match(result.reply, /pitches today 2\/5/);
 });
 
-test("the passcode acknowledges the boss and asks what to initiate", async () => {
+test("a bare passcode message verifies the boss and fires discovery immediately", async () => {
+  let called = null;
   const result = await handleBossMessage({
     message: "03210388",
     clientKey: "client-boss",
-    deps: { askText: cannedAsk },
+    deps: {
+      askText: cannedAsk,
+      runOutreachCycle: async (options) => {
+        called = options;
+        return {
+          status: "ok",
+          candidates: 4,
+          contactable: 2,
+          eligible: 1,
+          pitched: 1,
+          skipped: 0,
+          outcomes: [],
+        };
+      },
+    },
   });
   assert.equal(result.handled, true);
-  assert.equal(result.status, "boss_verified");
+  assert.equal(result.status, "boss_discovery");
   assert.equal(result.boss, true);
-  assert.match(result.reply, /boss/i);
-  assert.match(result.reply, /outbound agent discovery/i);
+  assert.deepEqual(called, { reason: "boss", force: true });
+  assert.match(result.reply, /1 pitched/);
   assert.ok(!result.reply.includes("03210388"));
 });
 
@@ -162,7 +177,7 @@ test("boss discovery runs directly and reports the cycle summary", async () => {
 test("a verified session keeps admin commands unlocked", async () => {
   const clientKey = "client-session";
   const first = await handleBossMessage({
-    message: "03210388",
+    message: "03210388 hello",
     clientKey,
     deps: { askText: cannedAsk },
   });
@@ -190,7 +205,7 @@ test("a verified session keeps admin commands unlocked", async () => {
 test("a verified session does not swallow ordinary offering requests", async () => {
   const clientKey = "client-session-offering";
   const first = await handleBossMessage({
-    message: "03210388",
+    message: "03210388 hello",
     clientKey,
     deps: { askText: cannedAsk },
   });
@@ -212,7 +227,9 @@ test("the client key is stable per operator and never leaks the api key", () => 
   assert.notEqual(key, bossClientKey(req, { clientId: "other" }));
 });
 
-test("the chat endpoint acknowledges a boss passcode over HTTP", async () => {
+test("the chat endpoint fires boss discovery for a bare passcode over HTTP", async () => {
+  const previousEnabled = config.outreach.enabled;
+  config.outreach.enabled = false;
   const app = (await import("../src/app.js")).default;
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -228,10 +245,11 @@ test("the chat endpoint acknowledges a boss passcode over HTTP", async () => {
     });
     const payload = await response.json();
     assert.equal(response.status, 200);
-    assert.equal(payload.status, "boss_verified");
+    assert.equal(payload.status, "boss_discovery");
     assert.equal(payload.boss.verified, true);
-    assert.match(payload.reply, /boss/i);
+    assert.match(payload.reply, /discovery/i);
   } finally {
+    config.outreach.enabled = previousEnabled;
     server.close();
   }
 });
@@ -255,5 +273,62 @@ test("the chat endpoint still rejects an empty message", async () => {
     assert.equal(payload.error.code, "MISSING_MESSAGE");
   } finally {
     server.close();
+  }
+});
+
+/** Sends a chat message with no credential of any kind and returns the reply. */
+const keylessChat = async (message) => {
+  const app = (await import("../src/app.js")).default;
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    return { status: response.status, payload: await response.json() };
+  } finally {
+    server.close();
+  }
+};
+
+test("a rotated boss passcode opens the chat route without an api key and fires discovery", async () => {
+  const previousKey = config.apiKey;
+  const previousPasscode = config.boss.passcode;
+  const previousEnabled = config.outreach.enabled;
+  config.apiKey = "chat-http-operator-key";
+  config.boss.passcode = "8x-novaquill-drift";
+  config.outreach.enabled = false;
+  try {
+    const { status, payload } = await keylessChat("8x-novaquill-drift");
+    assert.equal(status, 200);
+    assert.equal(payload.status, "boss_discovery");
+    assert.equal(payload.boss.verified, true);
+    assert.ok(!payload.reply.includes("8x-novaquill-drift"));
+  } finally {
+    config.apiKey = previousKey;
+    config.boss.passcode = previousPasscode;
+    config.outreach.enabled = previousEnabled;
+  }
+});
+
+test("the operator passcode 03210388 opens the chat route without an api key", async () => {
+  const previousKey = config.apiKey;
+  const previousPasscode = config.boss.passcode;
+  const previousEnabled = config.outreach.enabled;
+  config.apiKey = "chat-http-operator-key";
+  config.boss.passcode = "03210388";
+  config.outreach.enabled = false;
+  try {
+    const { status, payload } = await keylessChat("03210388");
+    assert.equal(status, 200);
+    assert.equal(payload.status, "boss_discovery");
+    assert.equal(payload.boss.verified, true);
+  } finally {
+    config.apiKey = previousKey;
+    config.boss.passcode = previousPasscode;
+    config.outreach.enabled = previousEnabled;
   }
 });

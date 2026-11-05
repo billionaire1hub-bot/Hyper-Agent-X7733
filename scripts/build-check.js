@@ -44,7 +44,7 @@ const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
 check(
   "package identity",
-  pkg.name === "hyper-agent-x7733" && pkg.version === "1.6.1",
+  pkg.name === "hyper-agent-x7733" && pkg.version === "1.6.2",
   `${pkg.name}@${pkg.version}`
 );
 check("ESM + Node 24.x", pkg.type === "module" && pkg.engines?.node === "24.x", pkg.engines?.node || "missing");
@@ -195,6 +195,7 @@ const cronPaths = (vercel.crons || []).map((cron) => cron.path);
 const missingCrons = cronPaths.filter((cronPath) => !routesSource.includes(cronPath));
 check("cron routes are implemented", cronPaths.length > 0 && missingCrons.length === 0, cronPaths.join(", ") || "no crons");
 const authSource = await readFile(path.join(root, "src/middleware/auth.js"), "utf8");
+const bossCredentialSource = await readFile(path.join(root, "src/lib/boss-passcode.js"), "utf8");
 const wakeSource = await readFile(path.join(root, "src/services/activation.js"), "utf8");
 const cronRouteDeclarations = routesSource
   .split(/\r?\n/)
@@ -206,15 +207,35 @@ check(
     ungatedCronRoutes.length === 0 &&
     !routesSource.includes("allowCron") &&
     authSource.includes("if (!config.cronSecret)") &&
-    authSource.includes("safeEqual(provided, config.cronSecret)") &&
+    authSource.includes("admits(anySecret(req), config.cronSecret)") &&
     !/"[0-9]{6,}"/.test(routesSource) &&
     !/\|\|\s*"[0-9]{6,}"/.test(wakeSource) &&
     wakeSource.includes('if (!config.cronSecret) return { ok: false, skipped: "cron_secret_missing" };') &&
     wakeSource.includes('"x-cron-secret": config.cronSecret') &&
-    routesSource.includes('import { requireApiKey, requireCronSecret } from "../middleware/auth.js"'),
+    routesSource.includes("requireApiKeyOrBossPasscode") &&
+    routesSource.includes("requireCronSecret"),
   ungatedCronRoutes.length
     ? `ungated: ${ungatedCronRoutes.join(" | ")}`
     : `${cronRouteDeclarations.length} cron routes fail closed on CRON_SECRET; no embedded literal`
+);
+check(
+  "operator surfaces are authenticated and the trigger secret is contained",
+  authSource.includes("export function requireCronSecret") &&
+    authSource.includes("export function requireApiKeyOrCronSecret") &&
+    authSource.includes("export function requireApiKeyOrBossPasscode") &&
+    authSource.includes("if (admits(headerSecrets(req), config.apiKey)) return next()") &&
+    authSource.includes("req?.query?.secret") &&
+    authSource.includes("req?.query?.passcode") &&
+    routesSource.includes('router.post("/api/chat", requireApiKeyOrBossPasscode') &&
+    routesSource.includes('router.get("/api/outreach", requireApiKeyOrCronSecret') &&
+    routesSource.includes('router.get("/api/revenue", requireApiKey') &&
+    routesSource.includes('router.post("/api/acp", requireApiKey') &&
+    routesSource.includes("req.query.run") &&
+    bossCredentialSource.includes("export const passcodeCanAuthenticate") &&
+    bossCredentialSource.includes("AUTH_MIN_LENGTH") &&
+    !bossCredentialSource.includes("PUBLIC_LITERALS") &&
+    authSource.includes("if (passcodeCanAuthenticate()) return next()"),
+  "chat accepts the API key or the boss passcode; outreach accepts ?secret= or ?passcode= and runs a sweep on &run=1"
 );
 check(
   "cron schedules are valid",

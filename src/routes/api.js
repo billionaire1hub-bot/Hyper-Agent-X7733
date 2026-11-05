@@ -4,7 +4,12 @@ import { config, walletConfigured } from "../config.js";
 import { AppError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 import { rateLimit } from "../lib/rateLimit.js";
-import { requireApiKey, requireCronSecret } from "../middleware/auth.js";
+import {
+  requireApiKey,
+  requireApiKeyOrBossPasscode,
+  requireApiKeyOrCronSecret,
+  requireCronSecret,
+} from "../middleware/auth.js";
 import { getAgentAddress } from "../chain/client.js";
 import { buildHealth } from "../services/health.js";
 import { getOffering, offeringsPublicJSON, validateParams } from "../services/offerings.js";
@@ -231,6 +236,7 @@ router.get("/api/chat", (_req, res) => {
       boss_discovery: "status=boss_discovery when outbound agent discovery runs directly",
       admin_required: "status=admin_required when an admin command arrives without the passcode",
     },
+    auth: "Send x-api-key (or Authorization: Bearer) when API_KEY is set. Boss operators can send the configured BOSS_PASSCODE in the message body instead: a bare passcode message verifies the boss session and immediately runs outbound agent discovery, with no API key header required.",
     note: "Read-only previews are free. Execution requires a funded ACP escrow job. Intelligence offerings preview provider availability only; the live report is generated when the job executes. A message containing the admin passcode is acknowledged as boss/admin and can trigger outbound agent discovery directly, outside the escrow flow.",
     timestamp: new Date().toISOString(),
   });
@@ -269,7 +275,7 @@ router.post("/api/acp", requireApiKey, rateLimit(), async (req, res, next) => {
   }
 });
 
-router.post("/api/chat", requireApiKey, rateLimit(), async (req, res, next) => {
+router.post("/api/chat", requireApiKeyOrBossPasscode, rateLimit(), async (req, res, next) => {
   try {
     const body = req.body || {};
     const execute = isTruthy(body.execute);
@@ -527,10 +533,32 @@ router.get("/api/a2a/inbox", requireApiKey, async (_req, res, next) => {
   }
 });
 
-router.get("/api/outreach", requireApiKey, async (_req, res, next) => {
+/**
+ * Outreach status surface. With a valid credential in the query string a
+ * browser can also fire an immediate sweep: append &run=1 (or &force=1).
+ */
+router.get("/api/outreach", requireApiKeyOrCronSecret, async (req, res, next) => {
   try {
     res.setHeader("Cache-Control", "no-store");
-    res.json({ success: true, outreach: await outreachStatus(), timestamp: new Date().toISOString() });
+    if (isTruthy(req.query.run) || isTruthy(req.query.force)) {
+      const summary = await runOutreachCycle({
+        reason: String(req.query.reason || "browser"),
+        force: true,
+      });
+      return res.json({
+        success: summary.status !== "failed",
+        triggered: true,
+        outreach: summary,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    res.json({
+      success: true,
+      outreach: await outreachStatus(),
+      trigger:
+        "Append &run=1 with a valid credential (?secret=<CRON_SECRET> or ?passcode=<BOSS_PASSCODE>) to run an immediate discovery sweep.",
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     next(error);
   }

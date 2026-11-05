@@ -1,6 +1,6 @@
 {
   "name": "hyper-agent-x7733",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "private": true,
   "description": "Hyper Agent X7733: ACP-compliant Base utility agent with live AI market intelligence and autonomous X publishing for Virtuals Protocol (Base mainnet)",
   "type": "module",

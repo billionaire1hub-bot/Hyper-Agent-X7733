@@ -55,9 +55,14 @@ test("the retired literal cron secret is rejected", () => {
   assert.equal(state.body.error.code, "UNAUTHORIZED");
 });
 
-test("a query-string secret is no longer accepted", () => {
+test("a query-string secret fires a cron sweep from a browser", () => {
   config.cronSecret = "scheduled-runner-secret";
-  const state = call({}, { secret: "scheduled-runner-secret" });
+  assert.equal(call({}, { secret: "scheduled-runner-secret" }).passed, true);
+});
+
+test("a query-string secret that does not match is rejected", () => {
+  config.cronSecret = "scheduled-runner-secret";
+  const state = call({}, { secret: "guess" });
   assert.equal(state.passed, false);
   assert.equal(state.status, 401);
 });

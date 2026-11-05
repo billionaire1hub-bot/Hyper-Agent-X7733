@@ -61,7 +61,7 @@ const DEFAULT_NEWS_FEEDS = [
 
 export const config = {
   env: str(process.env.NODE_ENV, "development"),
-  version: "1.6.1",
+  version: "1.6.2",
   slug: str(process.env.AGENT_SLUG, "hyper-agent-x7733"),
   name: str(process.env.AGENT_NAME, "Hyper Agent X7733"),
   description: str(

@@ -5,15 +5,9 @@ import { store, storeHelpers } from "../lib/store.js";
 import { askText } from "./ai.js";
 import { OFFERINGS } from "./offerings.js";
 import { outreachStatus, runOutreachCycle } from "./outreach.js";
+import { bossPasscode, containsPasscode } from "../lib/boss-passcode.js";
 
-const PASSCODE_MIN_LENGTH = 6;
-
-const safeEqual = (left, right) => {
-  const a = Buffer.from(String(left));
-  const b = Buffer.from(String(right));
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-};
+export { bossPasscode, containsPasscode };
 
 const ADMIN_PATTERNS = [
   /\boutbound\s+agent\s+discovery\b/i,
@@ -76,26 +70,6 @@ const CHAT_FALLBACK_REPLY =
 
 const ADMIN_FALLBACK_REPLY =
   "That is an admin-only command. Enter the secret passcode first, then repeat the request and I will run it.";
-
-export const bossPasscode = () => String(config.boss.passcode || "").trim();
-
-/**
- * Passcode check over the whole message. Every window of the same length is
- * compared with a constant-time comparison and the scan never breaks early, so
- * the check does not leak the position of a correct passcode.
- */
-export function containsPasscode(message) {
-  const passcode = bossPasscode();
-  if (passcode.length < PASSCODE_MIN_LENGTH) return false;
-  const haystack = String(message ?? "").toLowerCase();
-  const needle = passcode.toLowerCase();
-  if (!haystack || needle.length > haystack.length) return false;
-  let matched = false;
-  for (let index = 0; index + needle.length <= haystack.length; index += 1) {
-    if (safeEqual(haystack.slice(index, index + needle.length), needle)) matched = true;
-  }
-  return matched;
-}
 
 const matches = (patterns, message) => {
   const text = String(message ?? "");
@@ -252,20 +226,22 @@ export async function writeBossSession(clientKey) {
 
 /**
  * Passcode gate for the chat surface. A verified message runs boss commands
- * directly (discovery and status) instead of the paid-offering flow, an
- * unverified admin request is answered with the passcode requirement, and every
- * other message is handed back to the caller so the normal offering routing
- * stays untouched.
+ * directly (discovery and status) instead of the paid-offering flow, a bare
+ * passcode message verifies the boss session and fires discovery immediately,
+ * an unverified admin request is answered with the passcode requirement, and
+ * every other message is handed back to the caller so the normal offering
+ * routing stays untouched.
  */
 export async function handleBossMessage({ message, clientKey, deps = {} } = {}) {
   const text = String(message ?? "");
   const hasPasscode = containsPasscode(text);
   const wantsDiscovery = isDiscoveryRequest(text);
   const wantsStatus = isStatusRequest(text);
+  const barePasscode = text.trim().toLowerCase() === bossPasscode().toLowerCase();
 
   if (hasPasscode) {
     await writeBossSession(clientKey);
-    if (wantsDiscovery) return discoveryResponse(deps);
+    if (wantsDiscovery || barePasscode) return discoveryResponse(deps);
     if (wantsStatus) return statusResponse(deps);
     return {
       handled: true,

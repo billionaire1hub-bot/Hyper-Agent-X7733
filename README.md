@@ -229,9 +229,9 @@ The outbound menu is limited to offerings that validate with an empty parameter 
 
 **Operating it:**
 
-- `GET /api/outreach` (API-key protected) — activation, public URL source, channels, discovery sources, caps, pitches today, sessions and last error.
+- `GET /api/outreach` — activation, public URL source, channels, discovery sources, caps, pitches today, sessions and last error. Accepts `x-api-key`, `Authorization: Bearer`, `?secret=<CRON_SECRET>` or `?passcode=<BOSS_PASSCODE>` so a browser bar can read state; adding `&run=1` fires an immediate sweep instead.
 - `POST /api/outreach/start` (API-key protected) — immediately run one cycle without waiting for cron.
-- `GET /api/cron/outreach` — one cycle (requires `CRON_SECRET`; `?force=1` bypasses the interval throttle, not the daily cap, cooldown or opt-outs).
+- `GET /api/cron/outreach` — one cycle (requires `CRON_SECRET`; `?force=1` bypasses the interval throttle, not the daily cap, cooldown or opt-outs). Pasting `<public-url>/api/cron/outreach?secret=<CRON_SECRET>&force=1` into a browser runs the sweep with no headers, which is how to fire the first outbound cycle right after a deploy.
 - Long-running hosts (`npm start`) run an unref'd interval loop; Vercel uses four daily cron slots plus the chat-URL activation wake-up.
 - A2A pitches use JSON-RPC `message/send` with `metadata.sessionId`; X pitches are public mentions through the configured user-context X account.
 
@@ -347,7 +347,7 @@ All responses are JSON with CORS `Access-Control-Allow-Origin: *`. Unhandled err
 | GET | `/api/acp` | POST contract documentation and status codes |
 | POST | `/api/acp` | Execute a funded ACP job |
 | GET | `/api/chat` | Chat contract documentation |
-| POST | `/api/chat` | Natural-language preview/execution |
+| POST | `/api/chat` | Natural-language preview/execution (API key, or the boss passcode inside `message`) |
 | GET | `/api/jobs/:jobId` | Local job record (`?onchain=1` adds the live ACP state) |
 | GET | `/api/intake` | Job intake status: enabled, cursor, interval, last pass and recent outcomes |
 | GET/POST | `/api/cron/sweep` | Refund/close stale jobs (Vercel Cron calls this) |
@@ -355,8 +355,8 @@ All responses are JSON with CORS `Access-Control-Allow-Origin: *`. Unhandled err
 | GET | `/api/social` | Autonomous publishing status (`?verify=1` checks the X account) |
 | GET/POST | `/api/cron/social` | Run one publishing cycle when due (requires `CRON_SECRET`, `?force=1` allowed) |
 | GET | `/api/a2a/inbox` | Inbound A2A log: totals, 24 h counts, actions and the ten most recent messages (API key) |
-| GET | `/api/outreach` | Discovery/outreach status: enabled, caps, pitches today, last attempt/error, opt-outs (API key) |
-| GET/POST | `/api/cron/outreach` | Run one discovery and pitching cycle (requires `CRON_SECRET`, `?force=1` bypasses the interval only) |
+| GET | `/api/outreach` | Discovery/outreach status: enabled, caps, pitches today, last attempt/error, opt-outs (API key, `?secret=<CRON_SECRET>` or `?passcode=<BOSS_PASSCODE>`; `&run=1` fires an immediate sweep) |
+| GET/POST | `/api/cron/outreach` | Run one discovery and pitching cycle (requires `CRON_SECRET` by header or `?secret=`, `?force=1` bypasses the interval only) |
 | GET | `/.well-known/agent.json` | A2A v0.3 agent card |
 | GET | `/.well-known/agent-card.json` | A2A v1.0 agent card |
 | GET | `/a2a` | A2A endpoint description and supported methods |
@@ -426,11 +426,13 @@ Groq is the primary intent engine with Gemini as fallback. When neither key is c
 | `chat` | Nothing matched and no passcode was given | A normal conversational answer from Groq, with Gemini as fallback, plus a compact `capabilities` summary instead of the 50-item list. |
 | `admin_required` | An admin command was requested without the passcode | The reply tells the operator to enter the secret passcode first. |
 
-**Who may call it.** When `API_KEY` is set, `POST /api/chat` requires it — so a buyer or peer agent that cannot send a header never reaches this route. The key-free public surface is `POST /a2a` (and `GET /.well-known/agent-card.json`), which runs the same intent engine, the same session negotiation and the same `custom_task` quoting, and is preview-only until escrow verifies a funded job. Point the Virtuals chat URL at `/a2a`, or send the key with the request if the platform lets you configure a header.
+**Who may call it.** When `API_KEY` is set, `POST /api/chat` accepts it as `x-api-key` or `Authorization: Bearer`, **or** the boss passcode inside `message` — that is how an operator commands the agent from a plain chat client with no header support. The key-free public surface is `POST /a2a` (and `GET /.well-known/agent-card.json`), which runs the same intent engine, the same session negotiation and the same `custom_task` quoting, and is preview-only until escrow verifies a funded job. Point the Virtuals chat URL at `/a2a`, or send the key with the request if the platform lets you configure a header.
 
-**Boss passcode.** `BOSS_PASSCODE` (default `03210388`) is checked against the whole message with a constant-time comparison; it is never echoed back in a reply, a log line or an error. A verified message returns the boss acknowledgement and asks which task to initiate on Virtuals Protocol. The verification is remembered per operator for `BOSS_SESSION_TTL_SECONDS` (default 1800) so the next command does not need the code again; ordinary offering requests are never affected by that session.
+**Boss passcode.** `BOSS_PASSCODE` is checked against the whole message with a constant-time comparison; it is never echoed back in a reply, a log line or an error. A verified message returns the boss acknowledgement and asks which task to initiate on Virtuals Protocol. The verification is remembered per operator for `BOSS_SESSION_TTL_SECONDS` (default 1800) so the next command does not need the code again; ordinary offering requests are never affected by that session.
 
-**Outbound agent discovery.** `03210388 start outbound agent discovery` (or any equivalent phrasing) runs the outreach cycle directly with `reason: "boss"` and `force: true`, bypassing the 50-offering preview/escrow format, and returns the cycle summary: candidates scanned, contactable, eligible, pitched, skipped. `03210388 status` returns the live outreach and pipeline state.
+**Boss passcode.** `BOSS_PASSCODE` (default `03210388`) is checked against the whole message with a constant-time comparison; it is never echoed back in a reply, a log line or an error. A message that contains the passcode returns the boss acknowledgement and asks which task to initiate on Virtuals Protocol — and a message that is *just* the passcode goes one step further: it verifies the boss session and immediately runs outbound agent discovery. The verification is remembered per operator for `BOSS_SESSION_TTL_SECONDS` (default 1800) so the next command does not need the code again; ordinary offering requests are never affected by that session. Passcodes shorter than 8 characters cannot stand in for the API key (`403 BOSS_PASSCODE_TOO_WEAK`).
+
+**Outbound agent discovery.** `<BOSS_PASSCODE> start outbound agent discovery` (or any equivalent phrasing) runs the outreach cycle directly with `reason: "boss"` and `force: true`, bypassing the 50-offering preview/escrow format, and returns the cycle summary: candidates scanned, contactable, eligible, pitched, skipped. Sending the passcode by itself does the same — one bare-passcode message starts the sweep. `<BOSS_PASSCODE> status` returns the live outreach and pipeline state. The browser equivalent is `GET /api/outreach?passcode=<BOSS_PASSCODE>&run=1` (or `?secret=<CRON_SECRET>&run=1`), which fires an immediate sweep the same way; without `run=1` the route only reports status.
 
 **General conversation.** Anything that matches no offering is answered by `askText` in `src/services/ai.js`: Groq first, Gemini whenever Groq is unconfigured or fails. The response carries a compact capability summary (category counts, example requests and a pointer to `GET /api/offerings`); the full catalog is still returned when the message explicitly asks for it, for example `list offerings`.
 
@@ -445,7 +447,7 @@ Copy `.env.example` to `.env` and fill in:
 | `BASE_RPC_URL` | Recommended | Defaults to `https://mainnet.base.org`; use Alchemy/QuickNode/CDP for production throughput. |
 | `GROQ_API_KEY` / `GEMINI_API_KEY` | Required for intelligence | Groq (`qwen/qwen3.8-27b`, `GROQ_MODEL`) handles fast JSON intent and execution-time briefs; Gemini (`gemini-3.8-flash`, `GEMINI_MODEL`) handles Google Search grounding and is primary for article generation. Each engine falls back to the other automatically. The ten original intelligence offerings require at least one key (`503 AI_NOT_CONFIGURED` otherwise); the eighteen zero-gas insight offerings deliver deterministic data even when both engines are down. |
 | `GROQ_MAX_OUTPUT_TOKENS` | Optional | Per-request Groq output cap, default 1000. The Groq service tier rejects larger requests, so long briefs continue on Gemini. |
-| `BOSS_PASSCODE` | Optional | Admin passcode for `/api/chat`, default `03210388`. A message containing it is answered with the boss acknowledgement and unlocks the admin commands (outbound agent discovery, status). Never echoed back. |
+| `BOSS_PASSCODE` | Required for headerless admin | Admin passcode for `/api/chat` (default `03210388`). A message containing it answers with the boss acknowledgement and authenticates the request in place of `x-api-key`; a bare passcode message immediately runs outbound agent discovery. It also unlocks `GET /api/outreach?passcode=<value>` (add `&run=1` to fire a sweep). Must be 8+ characters to stand in for the API key. Never echoed back. |
 | `BOSS_SESSION_TTL_SECONDS` | Optional | How long a verified passcode keeps the admin commands unlocked for the same operator, default 1800 (60–86400). |
 | `COINGECKO_API_KEY` | Optional | Raises CoinGecko rate limits; public API works keyless. |
 | `NEWS_FEEDS` | Optional | Comma-separated RSS feeds. Defaults to CoinDesk, The Block, Decrypt and CryptoSlate. |
@@ -458,8 +460,8 @@ Copy `.env.example` to `.env` and fill in:
 | `SOCIAL_MAX_POSTS_PER_DAY` | Optional | Hard daily cap (default 4). |
 | `X_CONSUMER_KEY` / `X_CONSUMER_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | For posting | OAuth 1.0a user credentials with write access. `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN` and `TWITTER_ACCESS_TOKEN_SECRET` are accepted aliases. |
 | `X_USER_ACCESS_TOKEN` | Alternative | OAuth 2.0 user token (e.g. from a Virtuals X OAuth connection). `TWITTER_USER_ACCESS_TOKEN` is an accepted alias. |
-| `API_KEY` | Recommended | When set, `POST /api/acp`, `POST /api/chat`, `POST /api/quote` and the `GET /api/revenue*` endpoints require `x-api-key` or `Authorization: Bearer`. |
-| `CRON_SECRET` | Required for cron | Vercel sends `Authorization: Bearer $CRON_SECRET` to cron requests; other schedulers and the agent's own outreach wake-up send `x-cron-secret`. There is no built-in fallback secret: without it `/api/cron/sweep`, `/api/cron/intake`, `/api/cron/social`, `/api/cron/outreach` and `/api/cron/revenue` return 503 and `wakeOutreachCycle()` skips the call. |
+| `API_KEY` | Recommended | When set, `POST /api/acp`, `POST /api/quote`, `POST /api/outreach/start`, `GET /api/a2a/inbox` and the `GET /api/revenue*` endpoints require `x-api-key` or `Authorization: Bearer` (a query string is never accepted on these). `POST /api/chat` also accepts the `BOSS_PASSCODE` in the message; `GET /api/outreach` also accepts `?secret=<CRON_SECRET>` or `?passcode=<BOSS_PASSCODE>`. |
+| `CRON_SECRET` | Required for cron | Vercel sends `Authorization: Bearer $CRON_SECRET` to cron requests; other schedulers and the agent's own outreach wake-up send `x-cron-secret`, and a browser or any scheduler may use `?secret=<CRON_SECRET>` on `/api/cron/*` and on `GET /api/outreach`. That query value is accepted there and nowhere else, and the request log stores the path without its query. There is no built-in fallback secret: without it `/api/cron/sweep`, `/api/cron/intake`, `/api/cron/social`, `/api/cron/outreach` and `/api/cron/revenue` return 503 and `wakeOutreachCycle()` skips the call. |
 | `ACP_API_KEY` | Optional | Bearer token for the Virtuals ACP API (`/agents`). Also used as the default token for the optional authenticated outreach index. Public directory, registry, on-chain and allowlist discovery work without it. |
 | `UPSTASH_REDIS_REST_URL` / `TOKEN` | Required on Vercel | Durable job records, distributed locks, shared rate limits. Memory fallback is not reliable across serverless instances. |
 | `ACP_CONTRACT_ADDRESS` | Optional | Defaults to the official Base escrow. |
@@ -548,10 +550,12 @@ Nothing has to be run from a terminal after the deployment exists. With `PUBLIC_
 
 1. The first inbound request — a Virtuals probe, an agent-card fetch, a peer reply — reaches `observePublicUrl` in the global middleware in `src/app.js`.
 2. Because the URL is newly configured or newly observed, `observePublicUrl` reports `changed: true` and the middleware calls `wakeOutreachCycle(url, { reason: "activation" })`, which fetches `GET /api/cron/outreach?reason=activation&force=1` with `x-cron-secret` on this deployment.
-3. That wake runs `runOutreachCycle` inside its own serverless invocation: intake cursor bootstrap → directory sweep (2 pages, persisted cursor) → score → eligible candidates → teaser → analysis → pitch over A2A or X → session save. `force=1` bypasses only the 10-minute interval, never the daily cap, the 72-hour cooldown, the opt-out set or the lock.
+3. That wake runs `runOutreachCycle` inside its own serverless invocation: intake cursor bootstrap → directory sweep (4 parallel pages of 100, persisted cursor) → score → eligible candidates → teaser → analysis → pitch over A2A or X → session save. `force=1` bypasses only the 10-minute interval, never the daily cap, the 72-hour cooldown, the opt-out set or the lock.
 4. From then on the four cron slots plus `maybeWakeOutreach` on inbound traffic keep the cycle running, and each cycle advances the directory cursor, so discovery continues across the whole network without an operator.
 
 Without `PUBLIC_BASE_URL`, activation waits for the first request on a trusted `*.vercel.app` host — the same runtime path, just observed instead of configured. `CRON_SECRET` is mandatory: every cron route fails closed with 503 when it is missing, so an unset secret means no outreach rather than an open endpoint. `ALLOW_UNPAID_EXECUTION` is ignored on Vercel and when `NODE_ENV=production`, so a deployed agent cannot execute an unfunded job.
+
+**To fire a sweep yourself, from a browser:** open `https://<app>.vercel.app/api/cron/outreach?secret=<CRON_SECRET>&force=1`. No headers, no terminal, and the reply is the full cycle summary. `https://<app>.vercel.app/api/outreach?secret=<CRON_SECRET>` reads the same state without running anything, and `https://<app>.vercel.app/api/outreach?passcode=<BOSS_PASSCODE>&run=1` fires the sweep the same way. **From chat:** `POST /api/chat` with `{"message":"<BOSS_PASSCODE> start outbound agent discovery"}` and no `x-api-key` — or send `{"message":"<BOSS_PASSCODE>"}` alone, which verifies the boss session and starts discovery immediately.
 
 ### Vercel Cron plan limits
 
