@@ -31,7 +31,7 @@ export function buildOAuth1Header(method, url, overrides = {}) {
   if (!oauth1Configured()) {
     throw AppError.unavailable(
       "X posting requires OAuth 1.0a user credentials or a user access token.",
-      { missing: ["X_CONSUMER_KEY", "X_CONSUMER_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"] },
+      { missing: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"] },
       "X_NOT_CONFIGURED"
     );
   }
@@ -59,66 +59,109 @@ export function buildOAuth1Header(method, url, overrides = {}) {
   return `OAuth ${header}`;
 }
 
-const authHeaders = (method, url) => {
-  if (oauth1Configured()) return { authorization: buildOAuth1Header(method, url) };
-  if (oauth2UserConfigured()) return { authorization: `Bearer ${config.social.oauth2UserToken}` };
-  throw AppError.unavailable(
-    "X posting is not configured. Set X_CONSUMER_KEY/X_CONSUMER_SECRET/X_ACCESS_TOKEN/X_ACCESS_SECRET or X_USER_ACCESS_TOKEN.",
-    { missing: ["X_CONSUMER_KEY", "X_ACCESS_TOKEN", "X_USER_ACCESS_TOKEN"] },
+/**
+ * Every credential family that could authenticate a request, in preference
+ * order. OAuth 1.0a keys and OAuth 2.0 user tokens age independently, and X
+ * rejects stale ones with 401/403, so a request is tried against the next
+ * configured family before it is reported as failed.
+ */
+const credentialSets = () => {
+  const sets = [];
+  if (oauth1Configured()) {
+    sets.push({
+      name: "oauth1",
+      authorization: (method, url) => buildOAuth1Header(method, url),
+    });
+  }
+  if (oauth2UserConfigured()) {
+    sets.push({
+      name: "oauth2-user",
+      authorization: () => `Bearer ${config.social.oauth2UserToken}`,
+    });
+  }
+  return sets;
+};
+
+const xNotConfiguredError = () =>
+  AppError.unavailable(
+    "X posting is not configured. Set X_API_KEY/X_API_SECRET/X_ACCESS_TOKEN/X_ACCESS_SECRET or an X_BEARER_TOKEN with tweet.write scope.",
+    { missing: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET", "X_BEARER_TOKEN"] },
     "X_NOT_CONFIGURED"
   );
-};
+
+const authFailure = (status) => status === 401 || status === 403;
+
+const xHttpError = (status, message, payload, retryAfterMs) =>
+  new AppError(`x-api: ${message}`, {
+    status: status === 429 ? 503 : 502,
+    code: status === 429 ? "X_RATE_LIMITED" : `X_HTTP_${status}`,
+    details: {
+      status,
+      retryAfterMs,
+      resetAt: retryAfterMs ? new Date(Date.now() + retryAfterMs).toISOString() : null,
+      payload,
+    },
+    retryable: false,
+  });
 
 /**
  * Single-shot request: posting is never retried automatically, because a
- * timeout after X accepted the tweet would otherwise duplicate it.
+ * timeout after X accepted the tweet would otherwise duplicate it. The only
+ * retry is switching credential families after a 401/403, which proves X
+ * rejected the request before it was published.
  */
 async function xRequest(method, path, { body, timeoutMs = 15000 } = {}) {
   const url = `${API}${path}`;
+  const sets = credentialSets();
+  if (!sets.length) throw xNotConfiguredError();
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        accept: "application/json",
-        ...(body ? { "content-type": "application/json" } : {}),
-        ...authHeaders(method, url),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    const raw = await response.text();
-    let payload = null;
-    try {
-      payload = raw ? JSON.parse(raw) : null;
-    } catch {
-      payload = { raw: raw.slice(0, 300) };
-    }
-
-    if (!response.ok) {
-      const resetSeconds = Number(response.headers.get("x-rate-limit-reset"));
-      const retryAfterSeconds = Number(response.headers.get("retry-after"));
-      const retryAfterMs =
-        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-          ? retryAfterSeconds * 1000
-          : Number.isFinite(resetSeconds) && resetSeconds > 0
-            ? Math.max(0, resetSeconds * 1000 - Date.now())
-            : null;
-      const message = payload?.detail || payload?.title || `HTTP ${response.status}`;
-      throw new AppError(`x-api: ${message}`, {
-        status: response.status === 429 ? 503 : 502,
-        code: response.status === 429 ? "X_RATE_LIMITED" : `X_HTTP_${response.status}`,
-        details: {
-          status: response.status,
-          retryAfterMs,
-          resetAt: retryAfterMs ? new Date(Date.now() + retryAfterMs).toISOString() : null,
-          payload,
+    let rejected = null;
+    for (const [index, set] of sets.entries()) {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          accept: "application/json",
+          ...(body ? { "content-type": "application/json" } : {}),
+          authorization: set.authorization(method, url),
         },
-        retryable: false,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
+      const raw = await response.text();
+      let payload = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = { raw: raw.slice(0, 300) };
+      }
+
+      const message = payload?.detail || payload?.title || `HTTP ${response.status}`;
+      if (authFailure(response.status) && index < sets.length - 1) {
+        rejected = { set: set.name, status: response.status, message };
+        logger.info("x credential family rejected, trying the next one", {
+          rejected: set.name,
+          status: response.status,
+        });
+        continue;
+      }
+
+      if (!response.ok) {
+        const resetSeconds = Number(response.headers.get("x-rate-limit-reset"));
+        const retryAfterSeconds = Number(response.headers.get("retry-after"));
+        const retryAfterMs =
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : Number.isFinite(resetSeconds) && resetSeconds > 0
+              ? Math.max(0, resetSeconds * 1000 - Date.now())
+              : null;
+        throw xHttpError(response.status, message, payload, retryAfterMs);
+      }
+      return payload;
     }
-    return payload;
+    throw xHttpError(rejected?.status || 401, rejected?.message || "Unauthorized", null, null);
   } catch (error) {
     if (error instanceof AppError) throw error;
     const message =

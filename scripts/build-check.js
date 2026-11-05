@@ -439,6 +439,7 @@ check(
 );
 const activationSource = await readFile(path.join(root, "src/services/activation.js"), "utf8");
 const socialSource = await readFile(path.join(root, "src/services/social.js"), "utf8");
+const xSource = await readFile(path.join(root, "src/services/x.js"), "utf8");
 check(
   "outreach enabled by default",
   configSource.includes("bool(process.env.OUTREACH_ENABLED, true)") &&
@@ -581,11 +582,23 @@ check(
 check(
   "X posting defaults and diagnostics wired",
   configSource.includes("bool(process.env.SOCIAL_AUTOPOST, true)") &&
+    configSource.includes("X_API_KEY") &&
+    configSource.includes("X_BEARER_TOKEN") &&
     configSource.includes("TWITTER_API_KEY") &&
     configSource.includes("TWITTER_ACCESS_TOKEN_SECRET") &&
     socialSource.includes("xDiagnostics") &&
     socialSource.includes("socialPublishDue"),
-  "autopost on, X_*/TWITTER_* aliases, exact missing-slot diagnostics"
+  "autopost on, X_API_KEY/X_BEARER_TOKEN canonical names + X_*/TWITTER_* aliases, exact missing-slot diagnostics"
+);
+check(
+  "X auth failures fall back across credential families and degrade the sweep gracefully",
+  xSource.includes("credentialSets()") &&
+    xSource.includes("authFailure(response.status) && index < sets.length - 1") &&
+    outreachSource.includes("x_auth_failed_skipped") &&
+    outreachSource.includes("send.authError") &&
+    outreachSource.includes("latest.xAuth = null") &&
+    outreachSource.includes("xAuth: state.xAuth || null"),
+  "a 401/403 retries once with the other configured credential family; a confirmed auth failure skips the rest of the cycle's X-only targets without writing cooldowns"
 );
 check(
   "zero-gas intelligence suite untouched by the gate",

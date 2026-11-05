@@ -121,7 +121,7 @@ export const config = {
     ).replace(/\/+$/, ""),
     honeypotApiUrl: str(process.env.HONEYPOT_API_URL, "https://api.honeypot.is/v2").replace(/\/+$/, ""),
     newsFeeds: list(process.env.NEWS_FEEDS, DEFAULT_NEWS_FEEDS),
-    twitterBearerToken: str(process.env.TWITTER_BEARER_TOKEN),
+    twitterBearerToken: envFirst(process.env.X_BEARER_TOKEN, process.env.TWITTER_BEARER_TOKEN),
     kolHandles: list(process.env.KOL_HANDLES)
       .map((handle) => handle.replace(/^@/, ""))
       .filter((handle) => /^[A-Za-z0-9_]{1,15}$/.test(handle))
@@ -278,13 +278,14 @@ export const config = {
     articleMaxTokens: clamp(num(process.env.SOCIAL_ARTICLE_MAX_TOKENS, 1600), 600, 3000),
     xApiBase: envFirst(process.env.X_API_BASE, process.env.TWITTER_API_BASE, "https://api.x.com/2").replace(/\/+$/, ""),
     oauth1: {
-      consumerKey: envFirst(process.env.X_CONSUMER_KEY, process.env.TWITTER_API_KEY, process.env.TWITTER_CONSUMER_KEY),
-      consumerSecret: envFirst(process.env.X_CONSUMER_SECRET, process.env.TWITTER_API_SECRET, process.env.TWITTER_CONSUMER_SECRET),
+      consumerKey: envFirst(process.env.X_API_KEY, process.env.X_CONSUMER_KEY, process.env.TWITTER_API_KEY, process.env.TWITTER_CONSUMER_KEY),
+      consumerSecret: envFirst(process.env.X_API_SECRET, process.env.X_CONSUMER_SECRET, process.env.TWITTER_API_SECRET, process.env.TWITTER_CONSUMER_SECRET),
       accessToken: envFirst(process.env.X_ACCESS_TOKEN, process.env.TWITTER_ACCESS_TOKEN),
       accessSecret: envFirst(process.env.X_ACCESS_SECRET, process.env.TWITTER_ACCESS_TOKEN_SECRET, process.env.TWITTER_ACCESS_SECRET),
     },
     oauth2UserToken: envFirst(
       process.env.X_USER_ACCESS_TOKEN,
+      process.env.X_BEARER_TOKEN,
       process.env.TWITTER_USER_ACCESS_TOKEN,
       process.env.TWITTER_OAUTH2_USER_TOKEN
     ),

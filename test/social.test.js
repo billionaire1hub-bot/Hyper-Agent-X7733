@@ -145,7 +145,7 @@ test("X diagnostics identify configured slots without exposing credentials", () 
   assert.equal(diagnostics.configured, true);
   assert.equal(diagnostics.mode, "oauth1");
   assert.equal(diagnostics.oauth1Complete, true);
-  assert.deepEqual(diagnostics.missing, ["X_USER_ACCESS_TOKEN (or TWITTER_USER_ACCESS_TOKEN)"]);
+  assert.deepEqual(diagnostics.missing, ["X_BEARER_TOKEN (or X_USER_ACCESS_TOKEN / TWITTER_USER_ACCESS_TOKEN)"]);
   assert.equal(JSON.stringify(diagnostics).includes("test-consumer-key"), false);
 });
 

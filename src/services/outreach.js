@@ -364,7 +364,12 @@ export async function sendXPitch({ handle, text }) {
     const tweet = await postTweet(text);
     return { ok: true, tweetId: tweet.id, url: tweet.url };
   } catch (error) {
-    return { ok: false, error: sanitizeText(error.message, 200) };
+    return {
+      ok: false,
+      error: sanitizeText(error.message, 200),
+      code: error.code || null,
+      authError: error.code === "X_HTTP_401" || error.code === "X_HTTP_403",
+    };
   }
 }
 
@@ -800,6 +805,7 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
     }
 
     const wallet = getAgentAddress();
+    let xAuthFailed = null;
     for (const candidate of eligible) {
       if (Date.now() - startedAt > config.outreach.cycleBudgetMs * 0.85) {
         summary.skipped += eligible.length - summary.pitched;
@@ -911,6 +917,18 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_channel" });
         continue;
       }
+      // Once X answers 401/403 the credentials are dead for this cycle: further
+      // X-only targets are skipped instead of each failing and taking a
+      // cooldown, while A2A targets keep getting pitched.
+      if (channel === "x" && xAuthFailed) {
+        summary.skipped += 1;
+        summary.outcomes.push({
+          target: candidate.name || candidate.key,
+          action: "x_auth_failed_skipped",
+          error: xAuthFailed.message,
+        });
+        continue;
+      }
 
       const offering = getOffering(analysis.offeringId);
       const quoteUsdc = pitchPrice({
@@ -987,6 +1005,26 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       }
 
       if (!send.ok) {
+        // Dead credentials are the cycle's problem, not the target's: no
+        // cooldown is written, and the failure is remembered in the state so
+        // the operator can see it without digging through outcomes.
+        if (channel === "x" && send.authError) {
+          xAuthFailed = { code: send.code || "X_AUTH_FAILED", message: send.error };
+          const authState = await loadOutreachState();
+          authState.xAuth = {
+            code: xAuthFailed.code,
+            message: sanitizeText(xAuthFailed.message, 200),
+            at: nowIso(),
+          };
+          await saveOutreachState(authState);
+          summary.outcomes.push({
+            target: session.targetName,
+            action: "x_auth_failed",
+            channel,
+            error: send.error,
+          });
+          continue;
+        }
         summary.outcomes.push({
           target: session.targetName,
           action: "send_failed",
@@ -1033,6 +1071,7 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       const latest = await loadOutreachState();
       latest.day = dayKey();
       latest.dayCount = dailyPitchCount(latest) + 1;
+      if (channel === "x") latest.xAuth = null;
       latest.totalPitches = (Number(latest.totalPitches) || 0) + 1;
       latest.lastAttemptAt = nowIso();
       latest.outcomes.push({
@@ -1122,6 +1161,7 @@ export async function outreachStatus() {
     activation,
     xConfigured: xConfigured(),
     xPitchEnabled: config.outreach.xPitchEnabled,
+    xAuth: state.xAuth || null,
     channels: ["a2a", ...(config.outreach.xPitchEnabled && xConfigured() ? ["x"] : [])],
     driver: isVercel ? "vercel_cron" : "local_loop",
     intervalSeconds: config.outreach.intervalSeconds,
