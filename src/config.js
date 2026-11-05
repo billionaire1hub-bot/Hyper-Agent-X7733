@@ -278,8 +278,8 @@ export const config = {
     articleMaxTokens: clamp(num(process.env.SOCIAL_ARTICLE_MAX_TOKENS, 1600), 600, 3000),
     xApiBase: envFirst(process.env.X_API_BASE, process.env.TWITTER_API_BASE, "https://api.x.com/2").replace(/\/+$/, ""),
     oauth1: {
-      consumerKey: envFirst(process.env.X_API_KEY, process.env.X_CONSUMER_KEY, process.env.TWITTER_API_KEY, process.env.TWITTER_CONSUMER_KEY),
-      consumerSecret: envFirst(process.env.X_API_SECRET, process.env.X_CONSUMER_SECRET, process.env.TWITTER_API_SECRET, process.env.TWITTER_CONSUMER_SECRET),
+      consumerKey: envFirst(process.env.X_CONSUMER_KEY, process.env.X_API_KEY, process.env.TWITTER_API_KEY, process.env.TWITTER_CONSUMER_KEY),
+      consumerSecret: envFirst(process.env.X_CONSUMER_SECRET, process.env.X_API_SECRET, process.env.TWITTER_API_SECRET, process.env.TWITTER_CONSUMER_SECRET),
       accessToken: envFirst(process.env.X_ACCESS_TOKEN, process.env.TWITTER_ACCESS_TOKEN),
       accessSecret: envFirst(process.env.X_ACCESS_SECRET, process.env.TWITTER_ACCESS_TOKEN_SECRET, process.env.TWITTER_ACCESS_SECRET),
     },

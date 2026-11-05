@@ -582,13 +582,14 @@ check(
 check(
   "X posting defaults and diagnostics wired",
   configSource.includes("bool(process.env.SOCIAL_AUTOPOST, true)") &&
+    configSource.includes("X_CONSUMER_KEY") &&
     configSource.includes("X_API_KEY") &&
     configSource.includes("X_BEARER_TOKEN") &&
     configSource.includes("TWITTER_API_KEY") &&
     configSource.includes("TWITTER_ACCESS_TOKEN_SECRET") &&
     socialSource.includes("xDiagnostics") &&
     socialSource.includes("socialPublishDue"),
-  "autopost on, X_API_KEY/X_BEARER_TOKEN canonical names + X_*/TWITTER_* aliases, exact missing-slot diagnostics"
+  "autopost on, X_CONSUMER_KEY canonical names + X_API_KEY/X_BEARER_TOKEN/TWITTER_* aliases, exact missing-slot diagnostics"
 );
 check(
   "X auth failures fall back across credential families and degrade the sweep gracefully",

@@ -11,7 +11,7 @@ const { config } = await import("../src/config.js");
 const { oauth1Configured, oauth2UserConfigured, xConfigured } = await import("../src/services/x.js");
 const { xDiagnostics } = await import("../src/services/social.js");
 
-test("the Vercel variable names alone fully configure X posting", () => {
+test("the X_API_KEY/X_BEARER_TOKEN fallback names alone fully configure X posting", () => {
   assert.equal(config.social.oauth1.consumerKey, "vercel-api-key");
   assert.equal(config.social.oauth1.consumerSecret, "vercel-api-secret");
   assert.equal(config.social.oauth1.accessToken, "vercel-access-token");

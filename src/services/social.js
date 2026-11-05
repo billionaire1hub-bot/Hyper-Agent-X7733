@@ -236,8 +236,8 @@ export async function runSocialCycle({ reason = "interval", force = false } = {}
 export function xDiagnostics() {
   const { oauth1, oauth2UserToken } = config.social;
   const slots = [
-    { name: "X_API_KEY (or X_CONSUMER_KEY / TWITTER_API_KEY)", filled: Boolean(oauth1.consumerKey) },
-    { name: "X_API_SECRET (or X_CONSUMER_SECRET / TWITTER_API_SECRET)", filled: Boolean(oauth1.consumerSecret) },
+    { name: "X_CONSUMER_KEY (or X_API_KEY / TWITTER_API_KEY)", filled: Boolean(oauth1.consumerKey) },
+    { name: "X_CONSUMER_SECRET (or X_API_SECRET / TWITTER_API_SECRET)", filled: Boolean(oauth1.consumerSecret) },
     { name: "X_ACCESS_TOKEN (or TWITTER_ACCESS_TOKEN)", filled: Boolean(oauth1.accessToken) },
     { name: "X_ACCESS_SECRET (or TWITTER_ACCESS_TOKEN_SECRET)", filled: Boolean(oauth1.accessSecret) },
     { name: "X_BEARER_TOKEN (or X_USER_ACCESS_TOKEN / TWITTER_USER_ACCESS_TOKEN)", filled: Boolean(oauth2UserToken) },

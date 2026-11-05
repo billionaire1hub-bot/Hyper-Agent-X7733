@@ -31,7 +31,7 @@ export function buildOAuth1Header(method, url, overrides = {}) {
   if (!oauth1Configured()) {
     throw AppError.unavailable(
       "X posting requires OAuth 1.0a user credentials or a user access token.",
-      { missing: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"] },
+      { missing: ["X_CONSUMER_KEY", "X_CONSUMER_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"] },
       "X_NOT_CONFIGURED"
     );
   }
@@ -84,8 +84,8 @@ const credentialSets = () => {
 
 const xNotConfiguredError = () =>
   AppError.unavailable(
-    "X posting is not configured. Set X_API_KEY/X_API_SECRET/X_ACCESS_TOKEN/X_ACCESS_SECRET or an X_BEARER_TOKEN with tweet.write scope.",
-    { missing: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET", "X_BEARER_TOKEN"] },
+    "X posting is not configured. Set X_CONSUMER_KEY/X_CONSUMER_SECRET/X_ACCESS_TOKEN/X_ACCESS_SECRET or an X_BEARER_TOKEN with tweet.write scope.",
+    { missing: ["X_CONSUMER_KEY", "X_CONSUMER_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET", "X_BEARER_TOKEN"] },
     "X_NOT_CONFIGURED"
   );
 
