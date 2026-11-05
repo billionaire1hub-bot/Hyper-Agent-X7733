@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+// Neutralize the canonical slots so a real local .env cannot shadow the
+// fallback names this file is testing (dotenv never overrides set vars).
+process.env.X_CONSUMER_KEY = "";
+process.env.X_CONSUMER_SECRET = "";
+process.env.X_USER_ACCESS_TOKEN = "";
 process.env.X_API_KEY = "vercel-api-key";
 process.env.X_API_SECRET = "vercel-api-secret";
 process.env.X_BEARER_TOKEN = "vercel-bearer-token";

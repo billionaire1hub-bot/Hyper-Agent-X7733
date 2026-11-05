@@ -14,6 +14,7 @@
     "build": "node scripts/build-check.js",
     "test": "node --test test/*.test.js",
     "verify": "node scripts/verify-live.js",
+    "verify:x": "node scripts/x-verify.js",
     "social:preview": "node scripts/social-preview.js"
   },
   "dependencies": {

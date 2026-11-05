@@ -7,6 +7,7 @@ process.env.X_API_KEY = "fallback-api-key";
 process.env.X_API_SECRET = "fallback-api-secret";
 process.env.X_ACCESS_TOKEN = "vercel-access-token";
 process.env.X_ACCESS_SECRET = "vercel-access-secret";
+process.env.X_USER_ACCESS_TOKEN = "";
 process.env.X_BEARER_TOKEN = "vercel-bearer-token";
 
 const { config } = await import("../src/config.js");
