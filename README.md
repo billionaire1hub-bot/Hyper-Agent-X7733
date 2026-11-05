@@ -223,7 +223,7 @@ The outbound menu is limited to offerings that validate with an empty parameter 
 - **Loop detection** — a repeated message hash in the same session is ignored silently, and bot-to-bot ping-pong is cut by the turn cap.
 - **Opt-out** — any opt-out phrase adds the target to a permanent opt-out set; no further messages are sent.
 - **Sending back-off** — failed sends back off for 6 hours; every contact has a 72-hour cooldown.
-- **Daily cap** — `OUTREACH_DAILY_CAP` (default 5) pitches per UTC day, at most `OUTREACH_MAX_TARGETS` (default 2) per cycle.
+- **Daily cap** — `OUTREACH_DAILY_CAP` (default 12) pitches per UTC day, at most `OUTREACH_MAX_TARGETS` (default 5) per cycle.
 
 **Funding is verified, never assumed.** When a target claims to have funded job *N*, the agent calls `getJob(N)` and requires on-chain status `FUNDED`, provider equal to this agent's wallet, and a budget at least the quoted floor before marking the deal accepted. A claim that fails verification gets a `funded_unverified` reply and no execution. The agent **never funds a job itself**; the client locks escrow and the intake poller executes it.
 
@@ -480,8 +480,8 @@ Copy `.env.example` to `.env` and fill in:
 | `A2A_ENABLED` | Optional | `true` by default. Set `false` to disable `/a2a` and the agent cards. |
 | `OUTREACH_ENABLED` | Optional | `true` by default. Drives outbound discovery and pitching once `PUBLIC_BASE_URL` is configured or a trusted deployment URL is observed from the first inbound request. Set `false` to disable entirely. |
 | `OUTREACH_INTERVAL_SECONDS` / `OUTREACH_BUDGET_MS` | Optional | Local loop cadence (default 600, bounded 120–3600) and per-cycle wall-clock budget (default 40000, 10000–50000). |
-| `OUTREACH_DAILY_CAP` / `OUTREACH_MAX_TARGETS` | Optional | Pitches per UTC day (default 5, 1–20) and targets per cycle (default 2, 1–5). |
-| `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 55, 0–100) and per-target cooldown (default 72 h, 6–720). |
+| `OUTREACH_DAILY_CAP` / `OUTREACH_MAX_TARGETS` | Optional | Pitches per UTC day (default 12, 1–20) and targets per cycle (default 5, 1–5). |
+| `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 25, 0–100) and per-target cooldown (default 24 h, 6–720). |
 | `OUTREACH_SCAN_JOBS` | Optional | Recent on-chain jobs sampled for candidate discovery, default 60 (10–200). |
 | `OUTREACH_INDEX_URL` / `OUTREACH_INDEX_TOKEN` | Optional | Optional authenticated agent-index endpoint (default ACP `/agents`) and its bearer token (falls back to `ACP_API_KEY`). |
 | `OUTREACH_DIRECTORY_URL` / `OUTREACH_REGISTRY_URL` | Optional | Keyless public Virtuals directory (default `https://acpx.virtuals.io/api/agents`) and ACP registry base (default `https://api.acp.virtuals.io/agents`). |
