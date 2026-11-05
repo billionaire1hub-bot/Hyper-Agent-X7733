@@ -579,8 +579,10 @@ router.all("/api/cron/outreach", requireCronSecret, async (req, res, next) => {
 /**
  * Forces an immediate outbound discovery cycle. Used by the activation wake-up
  * and by the operator to start outreach without waiting for the daily cron.
+ * Accepts x-api-key / Bearer, or ?secret=<CRON_SECRET> / ?passcode=<BOSS_PASSCODE>
+ * so a browser POST works with no header support.
  */
-router.post("/api/outreach/start", requireApiKey, rateLimit(), async (req, res, next) => {
+router.post("/api/outreach/start", requireApiKeyOrCronSecret, rateLimit(), async (req, res, next) => {
   try {
     const summary = await runOutreachCycle({
       reason: String(req.body?.reason || req.query.reason || "manual"),

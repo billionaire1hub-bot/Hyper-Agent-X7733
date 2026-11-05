@@ -65,6 +65,29 @@ test("an explicitly configured URL also activates on its first request", async (
   }
 });
 
+test("a new deployment re-activates the loop on its first request", async () => {
+  await store.del(storeHelpers.publicUrl());
+  await store.del(storeHelpers.activationState());
+
+  const first = await observePublicUrl(request("agent.example.com"));
+  assert.equal(first.changed, true);
+  const sameDeployment = await observePublicUrl(request("agent.example.com"));
+  assert.equal(sameDeployment.changed, false);
+
+  process.env.VERCEL_GIT_COMMIT_SHA = "deploy-abc123";
+  try {
+    const afterDeploy = await observePublicUrl(request("agent.example.com"));
+    assert.equal(afterDeploy.changed, true);
+    const repeated = await observePublicUrl(request("agent.example.com"));
+    assert.equal(repeated.changed, false);
+    const status = await activationStatus();
+    assert.equal(status.deployment, "deploy-abc123");
+    assert.equal(status.deployments, 2);
+  } finally {
+    delete process.env.VERCEL_GIT_COMMIT_SHA;
+  }
+});
+
 test("wake-up authenticates in headers and keeps secrets out of the URL", async () => {
   const originalFetch = globalThis.fetch;
   let captured = null;

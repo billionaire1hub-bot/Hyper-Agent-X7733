@@ -228,6 +228,7 @@ check(
     authSource.includes("req?.query?.passcode") &&
     routesSource.includes('router.post("/api/chat", requireApiKeyOrBossPasscode') &&
     routesSource.includes('router.get("/api/outreach", requireApiKeyOrCronSecret') &&
+    routesSource.includes('router.post("/api/outreach/start", requireApiKeyOrCronSecret') &&
     routesSource.includes('router.get("/api/revenue", requireApiKey') &&
     routesSource.includes('router.post("/api/acp", requireApiKey') &&
     routesSource.includes("req.query.run") &&
@@ -235,7 +236,7 @@ check(
     bossCredentialSource.includes("AUTH_MIN_LENGTH") &&
     !bossCredentialSource.includes("PUBLIC_LITERALS") &&
     authSource.includes("if (passcodeCanAuthenticate()) return next()"),
-  "chat accepts the API key or the boss passcode; outreach accepts ?secret= or ?passcode= and runs a sweep on &run=1"
+  "chat accepts the API key or the boss passcode; outreach GET/POST accept ?secret= or ?passcode= and run a sweep on &run=1"
 );
 check(
   "cron schedules are valid",
@@ -450,10 +451,11 @@ check(
   activationSource.includes("observePublicUrl") &&
     activationSource.includes("wakeOutreachCycle") &&
     activationSource.includes("VERCEL_PROJECT_PRODUCTION_URL") &&
+    activationSource.includes("VERCEL_GIT_COMMIT_SHA") &&
     appSource.includes("observePublicUrl(req)") &&
     appSource.includes("wakeOutreachCycle(activation.url, { reason: \"activation\" })") &&
     routesSource.includes("/api/outreach/start"),
-  "trusted deployment host observation + authenticated self-wake + manual start"
+  "trusted deployment host observation + per-deploy activation wake + authenticated self-wake + manual start"
 );
 check(
   "inbound traffic keeps the outreach cycle self-waking between cron slots",

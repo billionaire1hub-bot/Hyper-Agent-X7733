@@ -64,17 +64,34 @@ export async function savePublicUrl(url) {
 }
 
 /**
+ * Identifies the deployed build. A new deployment is a new activation: the
+ * first request it serves wakes the outreach cycle, so a push followed by any
+ * inbound traffic (a probe, a cron slot, a peer reply) starts discovery
+ * immediately instead of waiting for the next interval.
+ */
+const deploymentMarker = () =>
+  String(process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || "").trim() ||
+  "local";
+
+const isNewDeployment = (activation) =>
+  Boolean(activation?.deployment) && activation.deployment !== deploymentMarker();
+
+/**
  * Records the URL the protocol is currently calling. A new or changed URL is
  * the signal that the chat URL was just saved or updated on the platform, and
- * it is what starts the outbound discovery loop.
+ * it is what starts the outbound discovery loop. A new deployment counts as an
+ * activation too, so every redeploy kicks the loop on its first request.
  */
 export async function observePublicUrl(req) {
   const configured = config.publicBaseUrl;
   const observed = publicUrlFromRequest(req);
-  const stored = await store.get(storeHelpers.publicUrl()).catch(() => null);
+  const [stored, activation] = await Promise.all([
+    store.get(storeHelpers.publicUrl()).catch(() => null),
+    store.get(storeHelpers.activationState()).catch(() => null),
+  ]);
 
   if (configured) {
-    const changed = stored?.url !== configured;
+    const changed = stored?.url !== configured || isNewDeployment(activation);
     if (changed) {
       await savePublicUrl(configured);
       await recordActivation(configured, "env");
@@ -88,7 +105,7 @@ export async function observePublicUrl(req) {
 
   if (!observed) return { url: current.url, source: current.source, changed: false };
 
-  if (current.url !== observed) {
+  if (current.url !== observed || isNewDeployment(activation)) {
     await savePublicUrl(observed);
     await recordActivation(observed, "observed");
     logger.info("public chat url observed", { url: observed });
@@ -100,12 +117,16 @@ export async function observePublicUrl(req) {
 
 async function recordActivation(url, source) {
   const previous = (await store.get(storeHelpers.activationState()).catch(() => null)) || {};
+  const sameUrl = previous.url === url;
+  const sameDeployment = previous.deployment === deploymentMarker();
   const state = {
     url,
     source,
-    firstSeenAt: previous.url === url ? previous.firstSeenAt : new Date().toISOString(),
+    deployment: deploymentMarker(),
+    firstSeenAt: sameUrl && sameDeployment ? previous.firstSeenAt : new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
-    activations: previous.url === url ? Number(previous.activations || 0) : Number(previous.activations || 0) + 1,
+    activations: sameUrl ? Number(previous.activations || 0) : Number(previous.activations || 0) + 1,
+    deployments: sameDeployment ? Number(previous.deployments || 0) : Number(previous.deployments || 0) + 1,
   };
   await store
     .set(storeHelpers.activationState(), state, { ttlSeconds: ACTIVATION_TTL_SECONDS })
@@ -124,9 +145,11 @@ export async function activationStatus() {
     publicBaseUrl: current.url || null,
     publicBaseUrlSource: current.source,
     urlConfigured: Boolean(current.url),
+    deployment: entry.deployment || null,
     firstSeenAt: entry.firstSeenAt || null,
     lastSeenAt: entry.lastSeenAt || null,
     activations: Number(entry.activations || 0),
+    deployments: Number(entry.deployments || 0),
     nextWakeEligibleAt: kick?.at ? new Date(Date.parse(kick.at) + kickTtlSeconds() * 1000).toISOString() : null,
     lastWakeAt: kick?.at || null,
     lastWakeReason: kick?.reason || null,
