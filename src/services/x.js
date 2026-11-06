@@ -189,6 +189,17 @@ const xNotConfiguredError = () =>
 
 const authFailure = (status) => status === 401 || status === 403;
 
+const creditsDepleted = (message) =>
+  typeof message === "string" && /credits? (depleted|exhausted)|not entitled/i.test(message);
+
+const xCreditsDepletedError = (message, payload) =>
+  new AppError(`x-api: ${message}`, {
+    status: 503,
+    code: "X_CREDITS_DEPLETED",
+    details: { payload },
+    retryable: false,
+  });
+
 const xHttpError = (status, message, payload, retryAfterMs) =>
   new AppError(`x-api: ${message}`, {
     status: status === 429 ? 503 : 502,
@@ -238,6 +249,13 @@ async function xRequest(method, path, { body, timeoutMs = 15000 } = {}) {
       }
 
       const message = payload?.detail || payload?.title || `HTTP ${response.status}`;
+      // Plan-level credit exhaustion passes auth; retrying other credential
+      // families or waiting for a rate limit can never help, so surface it as
+      // its own terminal error instead of burning the remaining attempts.
+      if (creditsDepleted(message)) {
+        throw xCreditsDepletedError(message, payload);
+      }
+
       if (authFailure(response.status)) {
         rejected = { set: attempt.name, status: response.status, message };
         logger.info("x credential family rejected, trying the next one", {

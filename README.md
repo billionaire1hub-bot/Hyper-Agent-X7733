@@ -482,7 +482,7 @@ Copy `.env.example` to `.env` and fill in:
 | `OUTREACH_ENABLED` | Optional | `true` by default. Drives outbound discovery and pitching once `PUBLIC_BASE_URL` is configured or a trusted deployment URL is observed from the first inbound request. Set `false` to disable entirely. |
 | `OUTREACH_INTERVAL_SECONDS` / `OUTREACH_BUDGET_MS` | Optional | Local loop cadence (default 600, bounded 120–3600) and per-cycle wall-clock budget (default 40000, 10000–50000). |
 | `OUTREACH_DAILY_CAP` / `OUTREACH_MAX_TARGETS` | Optional | Pitches per UTC day (default 12, 1–20) and targets per cycle (default 5, 1–5). |
-| `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 25, 0–100) and per-target cooldown (default 24 h, 6–720). |
+| `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 10, 0–100 — low gate so micro-value targets still get pitched) and per-target cooldown (default 24 h, 6–720). |
 | `OUTREACH_SCAN_JOBS` | Optional | Recent on-chain jobs sampled for candidate discovery, default 60 (10–200). |
 | `OUTREACH_INDEX_URL` / `OUTREACH_INDEX_TOKEN` | Optional | Optional authenticated agent-index endpoint (default ACP `/agents`) and its bearer token (falls back to `ACP_API_KEY`). |
 | `OUTREACH_DIRECTORY_URL` / `OUTREACH_REGISTRY_URL` | Optional | Keyless public Virtuals directory (default `https://acpx.virtuals.io/api/agents`) and ACP registry base (default `https://api.acp.virtuals.io/agents`). |
@@ -494,7 +494,7 @@ Copy `.env.example` to `.env` and fill in:
 | `OUTREACH_PRICE_MULTIPLIER` / `OUTREACH_MAX_PRICE_USDC` | Optional | Complexity multiplier (default 1, 0.5–3) and maximum quoted price (default 0.075 USDC). Quotes never go below list. |
 | `OUTREACH_CARD_TIMEOUT_MS` / `OUTREACH_SEND_TIMEOUT_MS` | Optional | A2A card fetch (default 6 s) and outbound send (default 9 s) timeouts. |
 | `CUSTOM_TASK_ENABLED` | Optional | `true` by default. Turns the beyond-catalogue ask, the `custom_task` order id and the inbound quote path on or off. |
-| `CUSTOM_TASK_BASE_PRICE_USDC` / `CUSTOM_TASK_MAX_PRICE_USDC` | Optional | Tier-1 price (default 0.05) and the hard ceiling (default 0.5). Tiers 2–5 are 1.5×/2×/2.5×/3× the base. |
+| `CUSTOM_TASK_BASE_PRICE_USDC` / `CUSTOM_TASK_MAX_PRICE_USDC` | Optional | Tier-1 price (default 0.01 — micro-cent clients stay in scope) and the hard ceiling (default 0.5). Tiers 2–5 are 1.5×/2×/2.5×/3× the base. |
 | `CUSTOM_TASK_MIN_CHARS` / `CUSTOM_TASK_MAX_CHARS` | Optional | Accepted brief length (default 24–600 characters). |
 | `CUSTOM_TASK_DEEP_THRESHOLD` / `CUSTOM_TASK_BUDGET_MS` | Optional | Complexity at which Gemini is preferred even without a deep signal (default 4) and the AI time budget for one brief (default 40 s). |
 | `REVENUE_ENABLED` | Optional | `true` by default. Enables the local revenue loop. `/api/cron/revenue` still runs when the loop is off. |

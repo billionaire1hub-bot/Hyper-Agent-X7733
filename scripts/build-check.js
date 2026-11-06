@@ -607,6 +607,17 @@ check(
   "OAuth 2.0 user token first with a /2/oauth2/token refresh attempt, then OAuth 1.0a; a confirmed auth failure skips the rest of the cycle's X-only targets without writing cooldowns"
 );
 check(
+  "X credit exhaustion is terminal per cycle: no family switching, no cooldowns",
+  xSource.includes("creditsDepleted") &&
+    xSource.includes('code: "X_CREDITS_DEPLETED"') &&
+    outreachSource.includes("send.creditsDepleted") &&
+    outreachSource.includes("x_credits_skipped") &&
+    outreachSource.includes("x_credits_depleted") &&
+    outreachSource.includes("latest.xCredits = null") &&
+    outreachSource.includes("xCredits: state.xCredits || null"),
+  "a plan-level 'credits depleted' response throws X_CREDITS_DEPLETED without trying other credential families, skips the cycle's remaining X sends, writes no contact cooldowns, and clears itself after the next successful pitch"
+);
+check(
   "zero-gas intelligence suite untouched by the gate",
   ONCHAIN_EXECUTION_OFFERINGS.size === 6 &&
     [

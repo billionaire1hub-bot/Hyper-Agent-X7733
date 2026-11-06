@@ -369,6 +369,7 @@ export async function sendXPitch({ handle, text }) {
       error: sanitizeText(error.message, 200),
       code: error.code || null,
       authError: error.code === "X_HTTP_401" || error.code === "X_HTTP_403",
+      creditsDepleted: error.code === "X_CREDITS_DEPLETED",
     };
   }
 }
@@ -806,6 +807,7 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
 
     const wallet = getAgentAddress();
     let xAuthFailed = null;
+    let xCreditsDepleted = null;
     for (const candidate of eligible) {
       if (Date.now() - startedAt > config.outreach.cycleBudgetMs * 0.85) {
         summary.skipped += eligible.length - summary.pitched;
@@ -919,7 +921,18 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       }
       // Once X answers 401/403 the credentials are dead for this cycle: further
       // X-only targets are skipped instead of each failing and taking a
-      // cooldown, while A2A targets keep getting pitched.
+      // cooldown, while A2A targets keep getting pitched. The same applies when
+      // the plan's monthly credits are exhausted — that cannot be fixed by any
+      // credential, so remaining X sends this cycle are pointless.
+      if (channel === "x" && xCreditsDepleted) {
+        summary.skipped += 1;
+        summary.outcomes.push({
+          target: candidate.name || candidate.key,
+          action: "x_credits_skipped",
+          error: xCreditsDepleted.message,
+        });
+        continue;
+      }
       if (channel === "x" && xAuthFailed) {
         summary.skipped += 1;
         summary.outcomes.push({
@@ -1005,6 +1018,27 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       }
 
       if (!send.ok) {
+        // Exhausted monthly credits are the account's problem, not the
+        // target's: no cooldown is written, remaining X sends this cycle are
+        // skipped, and the state records it so pitches resume automatically
+        // once the free-tier credits reset.
+        if (channel === "x" && send.creditsDepleted) {
+          xCreditsDepleted = { code: send.code || "X_CREDITS_DEPLETED", message: send.error };
+          const creditState = await loadOutreachState();
+          creditState.xCredits = {
+            code: xCreditsDepleted.code,
+            message: sanitizeText(xCreditsDepleted.message, 200),
+            at: nowIso(),
+          };
+          await saveOutreachState(creditState);
+          summary.outcomes.push({
+            target: session.targetName,
+            action: "x_credits_depleted",
+            channel,
+            error: send.error,
+          });
+          continue;
+        }
         // Dead credentials are the cycle's problem, not the target's: no
         // cooldown is written, and the failure is remembered in the state so
         // the operator can see it without digging through outcomes.
@@ -1071,7 +1105,10 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       const latest = await loadOutreachState();
       latest.day = dayKey();
       latest.dayCount = dailyPitchCount(latest) + 1;
-      if (channel === "x") latest.xAuth = null;
+      if (channel === "x") {
+        latest.xAuth = null;
+        latest.xCredits = null;
+      }
       latest.totalPitches = (Number(latest.totalPitches) || 0) + 1;
       latest.lastAttemptAt = nowIso();
       latest.outcomes.push({
@@ -1162,6 +1199,7 @@ export async function outreachStatus() {
     xConfigured: xConfigured(),
     xPitchEnabled: config.outreach.xPitchEnabled,
     xAuth: state.xAuth || null,
+    xCredits: state.xCredits || null,
     channels: ["a2a", ...(config.outreach.xPitchEnabled && xConfigured() ? ["x"] : [])],
     driver: isVercel ? "vercel_cron" : "local_loop",
     intervalSeconds: config.outreach.intervalSeconds,

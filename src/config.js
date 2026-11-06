@@ -50,7 +50,9 @@ const list = (value, fallback = []) => {
     .filter(Boolean);
 };
 
-const customTaskBasePrice = clamp(num(process.env.CUSTOM_TASK_BASE_PRICE_USDC, 0.05), 0.005, 10);
+// Micro-priced floor so the agent still engages clients offering just a few
+// cents while the wallet builds from zero.
+const customTaskBasePrice = clamp(num(process.env.CUSTOM_TASK_BASE_PRICE_USDC, 0.01), 0.001, 10);
 
 const DEFAULT_NEWS_FEEDS = [
   "https://www.coindesk.com/arc/outboundfeeds/rss",
@@ -204,7 +206,9 @@ export const config = {
     cycleBudgetMs: clamp(num(process.env.OUTREACH_BUDGET_MS, 40000), 10000, 50000),
     dailyCap: clamp(num(process.env.OUTREACH_DAILY_CAP, 12), 1, 20),
     maxTargetsPerCycle: clamp(num(process.env.OUTREACH_MAX_TARGETS, 5), 1, 5),
-    minScore: clamp(num(process.env.OUTREACH_MIN_SCORE, 25), 0, 100),
+    // 10 instead of 25: micro-earnings matter while the wallet starts from
+    // zero, so nearly every contactable target passes the gate.
+    minScore: clamp(num(process.env.OUTREACH_MIN_SCORE, 10), 0, 100),
     cooldownHours: clamp(num(process.env.OUTREACH_COOLDOWN_HOURS, 24), 6, 720),
     scanJobs: clamp(num(process.env.OUTREACH_SCAN_JOBS, 60), 10, 200),
     indexUrl: str(
