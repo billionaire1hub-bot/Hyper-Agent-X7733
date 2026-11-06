@@ -6,6 +6,9 @@ import test from "node:test";
 process.env.X_CONSUMER_KEY = "";
 process.env.X_CONSUMER_SECRET = "";
 process.env.X_USER_ACCESS_TOKEN = "";
+process.env.X_CLIENT_ID = "";
+process.env.X_CLIENT_SECRET = "";
+process.env.X_REFRESH_TOKEN = "";
 process.env.X_API_KEY = "vercel-api-key";
 process.env.X_API_SECRET = "vercel-api-secret";
 process.env.X_BEARER_TOKEN = "vercel-bearer-token";
@@ -30,8 +33,9 @@ test("the X_API_KEY/X_BEARER_TOKEN fallback names alone fully configure X postin
 
 test("diagnostics report every slot filled and expose no credential values", () => {
   const diagnostics = xDiagnostics();
-  assert.equal(diagnostics.mode, "oauth1");
+  assert.equal(diagnostics.mode, "oauth2-user");
   assert.equal(diagnostics.oauth1Complete, true);
+  assert.equal(diagnostics.oauth2Complete, true);
   assert.deepEqual(diagnostics.missing, []);
   assert.equal(JSON.stringify(diagnostics).includes("vercel-api-key"), false);
   assert.equal(JSON.stringify(diagnostics).includes("vercel-bearer-token"), false);

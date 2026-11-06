@@ -585,21 +585,26 @@ check(
     configSource.includes("X_CONSUMER_KEY") &&
     configSource.includes("X_API_KEY") &&
     configSource.includes("X_BEARER_TOKEN") &&
+    configSource.includes("X_CLIENT_SECRET") &&
+    configSource.includes("X_REFRESH_TOKEN") &&
     configSource.includes("TWITTER_API_KEY") &&
     configSource.includes("TWITTER_ACCESS_TOKEN_SECRET") &&
     socialSource.includes("xDiagnostics") &&
+    socialSource.includes("oauth2Complete") &&
     socialSource.includes("socialPublishDue"),
-  "autopost on, X_CONSUMER_KEY canonical names + X_API_KEY/X_BEARER_TOKEN/TWITTER_* aliases, exact missing-slot diagnostics"
+  "autopost on, X_CONSUMER_KEY canonical names + X_API_KEY/X_BEARER_TOKEN/TWITTER_* aliases, OAuth 2.0 client/refresh slots, exact missing-slot diagnostics"
 );
 check(
   "X auth failures fall back across credential families and degrade the sweep gracefully",
-  xSource.includes("credentialSets()") &&
-    xSource.includes("authFailure(response.status) && index < sets.length - 1") &&
+  xSource.includes("authAttempts(") &&
+    xSource.includes("authFailure(response.status)") &&
+    xSource.includes("refreshOAuth2AccessToken") &&
+    xSource.includes("grant_type=refresh_token") &&
     outreachSource.includes("x_auth_failed_skipped") &&
     outreachSource.includes("send.authError") &&
     outreachSource.includes("latest.xAuth = null") &&
     outreachSource.includes("xAuth: state.xAuth || null"),
-  "a 401/403 retries once with the other configured credential family; a confirmed auth failure skips the rest of the cycle's X-only targets without writing cooldowns"
+  "OAuth 2.0 user token first with a /2/oauth2/token refresh attempt, then OAuth 1.0a; a confirmed auth failure skips the rest of the cycle's X-only targets without writing cooldowns"
 );
 check(
   "zero-gas intelligence suite untouched by the gate",

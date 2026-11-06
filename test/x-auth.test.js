@@ -26,7 +26,7 @@ test("both credential families are configured for the fallback tests", () => {
   assert.equal(oauth2UserConfigured(), true);
 });
 
-test("a 401 from OAuth 1.0a retries once with the OAuth 2.0 user token", async () => {
+test("a 401 from the OAuth 2.0 user token retries once with OAuth 1.0a", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
@@ -38,8 +38,8 @@ test("a 401 from OAuth 1.0a retries once with the OAuth 2.0 user token", async (
     const tweet = await postTweet("hello");
     assert.equal(tweet.id, "123");
     assert.equal(calls.length, 2);
-    assert.match(calls[0].authorization, /^OAuth /);
-    assert.equal(calls[1].authorization, "Bearer test-oauth2-user-token");
+    assert.equal(calls[0].authorization, "Bearer test-oauth2-user-token");
+    assert.match(calls[1].authorization, /^OAuth /);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -57,8 +57,8 @@ test("a 403 also switches credential families", async () => {
     const tweet = await postTweet("hello");
     assert.equal(tweet.id, "456");
     assert.equal(calls.length, 2);
-    assert.match(calls[0], /^OAuth /);
-    assert.equal(calls[1], "Bearer test-oauth2-user-token");
+    assert.equal(calls[0], "Bearer test-oauth2-user-token");
+    assert.match(calls[1], /^OAuth /);
   } finally {
     globalThis.fetch = originalFetch;
   }

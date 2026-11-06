@@ -289,6 +289,15 @@ export const config = {
       process.env.TWITTER_USER_ACCESS_TOKEN,
       process.env.TWITTER_OAUTH2_USER_TOKEN
     ),
+    oauth2: {
+      clientId: envFirst(process.env.X_CLIENT_ID, process.env.TWITTER_CLIENT_ID),
+      clientSecret: envFirst(process.env.X_CLIENT_SECRET, process.env.TWITTER_CLIENT_SECRET),
+      refreshToken: envFirst(
+        process.env.X_REFRESH_TOKEN,
+        process.env.X_OAUTH2_REFRESH_TOKEN,
+        process.env.TWITTER_OAUTH2_REFRESH_TOKEN
+      ),
+    },
   },
 
   store: {

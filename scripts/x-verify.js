@@ -5,18 +5,19 @@
  *
  *   npm run verify:x
  */
-import { oauth1Configured, oauth2UserConfigured, verifyXCredentials } from "../src/services/x.js";
+import { oauth2RefreshConfigured, verifyXCredentials, xConfigured } from "../src/services/x.js";
 import { xDiagnostics } from "../src/services/social.js";
 
 const diagnostics = xDiagnostics();
 console.log("X configuration:");
 console.log(`  mode: ${diagnostics.mode}`);
 console.log(`  oauth1 complete: ${diagnostics.oauth1Complete}`);
+console.log(`  oauth2 complete: ${diagnostics.oauth2Complete}${oauth2RefreshConfigured() ? " (refresh flow)" : ""}`);
 if (diagnostics.missing.length) {
   console.log(`  missing slots: ${diagnostics.missing.join(", ")}`);
 }
 
-if (!oauth1Configured() && !oauth2UserConfigured()) {
+if (!xConfigured()) {
   console.log("FAIL: no X credential family is fully configured.");
   process.exitCode = 1;
 } else {
@@ -28,7 +29,7 @@ if (!oauth1Configured() && !oauth2UserConfigured()) {
     console.log(`FAIL: ${error.code} — ${error.message}`);
     if (error.details?.status === 401) {
       console.log(
-        "X answered 401 'Invalid or expired token': regenerate the Access Token and Secret in the developer portal (Keys and tokens) after enabling OAuth 1.0a under User authentication settings, then update the env vars and redeploy."
+        "X answered 401: the OAuth 2.0 token is missing the tweet.write scope, expired, or the app has no user-context permissions. In the developer portal check App Type = Web App, Automated App or Bot (Confidential Client), grant Read and Write app permissions, and re-issue the OAuth 2.0 user token (or Client ID/Secret + Refresh Token). OAuth 1.0a fallbacks are rejected by X (code 89) and are not a fix."
       );
     }
     process.exitCode = 1;

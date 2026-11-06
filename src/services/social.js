@@ -4,7 +4,7 @@ import { acquireLock, releaseLock, store, storeHelpers } from "../lib/store.js";
 import { aiConfigured } from "./ai.js";
 import { generateArticle, pickArticleTheme } from "./articles.js";
 import { getJobRecord, isStaleProcessing, JOB_STATUS, listPendingJobs } from "./jobs.js";
-import { oauth1Configured, oauth2UserConfigured, postThread, verifyXCredentials, xConfigured } from "./x.js";
+import { oauth1Configured, oauth2RefreshConfigured, oauth2UserConfigured, postThread, verifyXCredentials, xConfigured } from "./x.js";
 
 const STATE_TTL_SECONDS = 90 * 24 * 60 * 60;
 const LOCK_TTL_SECONDS = 300;
@@ -234,21 +234,27 @@ export async function runSocialCycle({ reason = "interval", force = false } = {}
  * what is missing instead of a generic "X_NOT_CONFIGURED".
  */
 export function xDiagnostics() {
-  const { oauth1, oauth2UserToken } = config.social;
+  const { oauth1, oauth2UserToken, oauth2 } = config.social;
+  const refreshConfigured = oauth2RefreshConfigured();
+  const userTokenPresent = Boolean(oauth2UserToken);
   const slots = [
-    { name: "X_CONSUMER_KEY (or X_API_KEY / TWITTER_API_KEY)", filled: Boolean(oauth1.consumerKey) },
-    { name: "X_CONSUMER_SECRET (or X_API_SECRET / TWITTER_API_SECRET)", filled: Boolean(oauth1.consumerSecret) },
-    { name: "X_ACCESS_TOKEN (or TWITTER_ACCESS_TOKEN)", filled: Boolean(oauth1.accessToken) },
-    { name: "X_ACCESS_SECRET (or TWITTER_ACCESS_TOKEN_SECRET)", filled: Boolean(oauth1.accessSecret) },
-    { name: "X_BEARER_TOKEN (or X_USER_ACCESS_TOKEN / TWITTER_USER_ACCESS_TOKEN)", filled: Boolean(oauth2UserToken) },
+    { name: "X_USER_ACCESS_TOKEN (or X_BEARER_TOKEN / TWITTER_USER_ACCESS_TOKEN)", filled: userTokenPresent, optional: refreshConfigured },
+    { name: "X_CLIENT_ID (or TWITTER_CLIENT_ID)", filled: Boolean(oauth2.clientId), optional: userTokenPresent },
+    { name: "X_CLIENT_SECRET (or TWITTER_CLIENT_SECRET)", filled: Boolean(oauth2.clientSecret), optional: userTokenPresent },
+    { name: "X_REFRESH_TOKEN (or TWITTER_OAUTH2_REFRESH_TOKEN)", filled: Boolean(oauth2.refreshToken), optional: userTokenPresent },
+    { name: "X_CONSUMER_KEY (or X_API_KEY / TWITTER_API_KEY)", filled: Boolean(oauth1.consumerKey), optional: false },
+    { name: "X_CONSUMER_SECRET (or X_API_SECRET / TWITTER_API_SECRET)", filled: Boolean(oauth1.consumerSecret), optional: false },
+    { name: "X_ACCESS_TOKEN (or TWITTER_ACCESS_TOKEN)", filled: Boolean(oauth1.accessToken), optional: false },
+    { name: "X_ACCESS_SECRET (or TWITTER_ACCESS_TOKEN_SECRET)", filled: Boolean(oauth1.accessSecret), optional: false },
   ];
-  const missing = slots.filter((slot) => !slot.filled).map((slot) => slot.name);
+  const missing = slots.filter((slot) => !slot.filled && !slot.optional).map((slot) => slot.name);
   return {
-    mode: oauth1Configured() ? "oauth1" : oauth2UserConfigured() ? "oauth2-user" : "none",
+    mode: oauth2UserConfigured() || oauth2RefreshConfigured() ? "oauth2-user" : oauth1Configured() ? "oauth1" : "none",
     configured: xConfigured(),
     slots,
     missing,
     oauth1Complete: Boolean(oauth1.consumerKey && oauth1.consumerSecret && oauth1.accessToken && oauth1.accessSecret),
+    oauth2Complete: userTokenPresent || refreshConfigured,
   };
 }
 
@@ -288,7 +294,7 @@ export async function socialStatus({ verify = false } = {}) {
     aiConfigured: aiConfigured(),
     x: {
       configured: xConfigured(),
-      mode: oauth1Configured() ? "oauth1" : oauth2UserConfigured() ? "oauth2-user" : "none",
+      mode: oauth2UserConfigured() || oauth2RefreshConfigured() ? "oauth2-user" : oauth1Configured() ? "oauth1" : "none",
       diagnostics: xDiagnostics(),
     },
     lastAttemptAt: state.lastAttemptAt,

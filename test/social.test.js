@@ -145,7 +145,13 @@ test("X diagnostics identify configured slots without exposing credentials", () 
   assert.equal(diagnostics.configured, true);
   assert.equal(diagnostics.mode, "oauth1");
   assert.equal(diagnostics.oauth1Complete, true);
-  assert.deepEqual(diagnostics.missing, ["X_BEARER_TOKEN (or X_USER_ACCESS_TOKEN / TWITTER_USER_ACCESS_TOKEN)"]);
+  assert.equal(diagnostics.oauth2Complete, false);
+  assert.deepEqual(diagnostics.missing, [
+    "X_USER_ACCESS_TOKEN (or X_BEARER_TOKEN / TWITTER_USER_ACCESS_TOKEN)",
+    "X_CLIENT_ID (or TWITTER_CLIENT_ID)",
+    "X_CLIENT_SECRET (or TWITTER_CLIENT_SECRET)",
+    "X_REFRESH_TOKEN (or TWITTER_OAUTH2_REFRESH_TOKEN)",
+  ]);
   assert.equal(JSON.stringify(diagnostics).includes("test-consumer-key"), false);
 });
 
