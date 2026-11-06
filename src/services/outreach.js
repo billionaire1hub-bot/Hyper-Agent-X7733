@@ -1,15 +1,17 @@
 import crypto from "node:crypto";
+import { formatUnits } from "viem";
 import { config, isVercel, walletConfigured } from "../config.js";
 import { logger } from "../lib/logger.js";
 import { acquireLock, releaseLock, store, storeHelpers } from "../lib/store.js";
-import { getAgentAddress } from "../chain/client.js";
+import { agentEthBalance, getAgentAddress } from "../chain/client.js";
 import { aiConfigured, aiHealth, askGrounded, askJSON } from "./ai.js";
 import { activationStatus, loadPublicUrl } from "./activation.js";
 import { customAskText, customQuoteText, normalizeRequirement } from "./custom.js";
 import { discoverTargets, INTEL_OFFERINGS } from "./discovery.js";
 import { getAcpJob } from "./escrow.js";
+import { gasUnlockStatus } from "./gas.js";
 import { ensureIntakeCursor, intakeStatus, parseJobOrder } from "./intake.js";
-import { getBinanceDerivatives, getGlobalMarket, getTrendingCoins } from "./market.js";
+import { getBinanceDerivatives, getEthUsdPrice, getGlobalMarket, getTrendingCoins } from "./market.js";
 import { getLatestNews } from "./news.js";
 import { CUSTOM_TASK_OFFERING_ID, assessCustomTask, getOffering } from "./offerings.js";
 import {
@@ -1160,8 +1162,72 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
   }
 }
 
+async function withFallback(promise, ms, fallback) {
+  let timer;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([promise.catch(() => fallback), guard]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Auto-upgrade rule for the free X tier: once the payout wallet's USD balance
+ * covers the cheapest paid X plan (X_AUTO_UPGRADE_THRESHOLD_USD, default $100
+ * for Basic), the trigger is recorded and surfaced in the status. The operator
+ * flips the plan in the X developer portal; X pitching resumes automatically
+ * because the cycle retries X every round and clears xCredits on first success.
+ */
+export async function xAutoUpgradeStatus({ ethBalance, priceUsd } = {}) {
+  const rule = config.social.xAutoUpgrade;
+  if (!rule.enabled) {
+    return { enabled: false, thresholdUsd: null, walletUsd: null, eligible: false, notifiedAt: null, action: null };
+  }
+  // An explicit null means "balance unknown" and stays null; only an omitted
+  // parameter triggers a live read of the agent wallet.
+  let balance = ethBalance;
+  if (balance === undefined) {
+    balance = walletConfigured ? await withFallback(agentEthBalance(), 4000, null) : null;
+  }
+  const quoteUsd = priceUsd ?? (await getEthUsdPrice()).priceUsd;
+  const walletUsd =
+    balance === null || balance === undefined
+      ? null
+      : Number((Number(formatUnits(balance, 18)) * Number(quoteUsd)).toFixed(6));
+  const eligible = walletUsd !== null && walletUsd >= rule.thresholdUsd;
+  let notifiedAt = null;
+  if (eligible) {
+    const record = await store.get(storeHelpers.xAutoUpgradeNotified()).catch(() => null);
+    notifiedAt = record?.at || null;
+    if (!notifiedAt) {
+      await store
+        .set(storeHelpers.xAutoUpgradeNotified(), {
+          at: nowIso(),
+          walletUsd,
+          thresholdUsd: rule.thresholdUsd,
+        })
+        .catch(() => null);
+      logger.info("x auto-upgrade trigger reached: wallet balance covers the cheapest X API plan", {
+        walletUsd,
+        thresholdUsd: rule.thresholdUsd,
+      });
+    }
+  }
+  return {
+    enabled: true,
+    thresholdUsd: rule.thresholdUsd,
+    walletUsd,
+    eligible,
+    notifiedAt,
+    action: eligible ? "upgrade the X plan in the developer portal; X pitching resumes automatically" : null,
+  };
+}
+
 export async function outreachStatus() {
-  const [state, optOuts, publicUrl, activation, intake, ai, sweep] = await Promise.all([
+  const [state, optOuts, publicUrl, activation, intake, ai, sweep, ethBalance] = await Promise.all([
     loadOutreachState(),
     store.smembers(storeHelpers.outreachOptOut()).catch(() => []),
     loadPublicUrl(),
@@ -1169,7 +1235,14 @@ export async function outreachStatus() {
     intakeStatus().catch(() => null),
     aiHealth().catch(() => null),
     loadDirectorySweep(),
+    walletConfigured ? withFallback(agentEthBalance(), 4000, null) : Promise.resolve(null),
   ]);
+  const unlock = await withFallback(
+    gasUnlockStatus({ ethBalance }),
+    6000,
+    null
+  );
+  const xUpgrade = await xAutoUpgradeStatus({ ethBalance });
   return {
     enabled: config.outreach.enabled,
     aiConfigured: aiConfigured(),
@@ -1192,6 +1265,15 @@ export async function outreachStatus() {
       intakeDriver: intake?.driver ?? null,
       gasGatedJobs: intake?.gasGatedJobs?.length ?? 0,
     },
+    zeroCapital: {
+      walletAddress: walletConfigured ? getAgentAddress() : null,
+      balanceEth: unlock?.balanceEth ?? null,
+      balanceUsd: unlock?.balanceUsd ?? null,
+      unlockMinUsd: unlock?.minUsd ?? config.execution.onchainUnlockMinUsd,
+      unlocked: unlock?.unlocked ?? null,
+      progress: unlock?.progress ?? null,
+    },
+    xAutoUpgrade: xUpgrade,
     publicBaseUrlConfigured: Boolean(config.publicBaseUrl),
     publicUrl: publicUrl.url,
     publicUrlSource: publicUrl.source,

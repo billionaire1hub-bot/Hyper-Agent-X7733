@@ -158,6 +158,7 @@ export const storeHelpers = {
   socialLock: () => key("lock:social"),
   socialState: () => key("social:state"),
   xOauth2Token: () => key("x:oauth2:token"),
+  xAutoUpgradeNotified: () => key("x:autoupgrade:notified"),
   intakeLock: () => key("lock:intake"),
   intakeCursor: () => key(`intake:cursor:${config.chain.id}`),
   intakeState: () => key(`intake:state:${config.chain.id}`),

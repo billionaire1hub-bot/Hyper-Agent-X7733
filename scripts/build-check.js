@@ -512,7 +512,23 @@ check(
   "public Virtuals tasks, A2A pitches and X mentions"
 );
 const discoverySource = await readFile(path.join(root, "src/services/discovery.js"), "utf8");
+check(
+  "zero-capital pipeline surfaced: $0.75 unlock progress + X auto-upgrade trigger",
+  gasSource.includes("unlockProgress") &&
+    configSource.includes("X_AUTO_UPGRADE_THRESHOLD_USD") &&
+    outreachSource.includes("xAutoUpgradeStatus") &&
+    outreachSource.includes("zeroCapital") &&
+    outreachSource.includes("unlockMinUsd: unlock?.minUsd") &&
+    outreachSource.includes("xAutoUpgrade: xUpgrade"),
+  "wallet balance -> USD progress toward ONCHAIN_UNLOCK_MIN_USD exposed in outreach status; once earnings cover the cheapest X plan the auto-upgrade trigger is recorded and surfaced"
+);
 const storeSource = await readFile(path.join(root, "src/lib/store.js"), "utf8");
+check(
+  "the X auto-upgrade trigger persists once in the store",
+  storeSource.includes('xAutoUpgradeNotified: () => key("x:autoupgrade:notified")') &&
+    outreachSource.includes("storeHelpers.xAutoUpgradeNotified"),
+  "the one-time 'wallet covers the cheapest X plan' notification key exists and is written by the outreach status path"
+);
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(
   "Virtuals directory pagination follows the live API contract",

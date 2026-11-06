@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { ONCHAIN_EXECUTION_OFFERINGS, config } from "../src/config.js";
 import { onchainGasGated } from "../src/chain/client.js";
-import { unlockWeiFor } from "../src/services/gas.js";
+import { unlockProgress, unlockWeiFor } from "../src/services/gas.js";
 import { OFFERINGS } from "../src/services/offerings.js";
 
 const ONCHAIN_IDS = [
@@ -51,6 +51,22 @@ test("USD threshold converts to wei via the live-price or fallback rate", () => 
   assert.ok(unlockWeiFor(0.75, NaN) > 0n, "non-numeric price falls back to the configured rate");
   assert.ok(config.execution.onchainUnlockMinUsd >= 0.1 && config.execution.onchainUnlockMinUsd <= 10);
   assert.ok(config.execution.ethUsdFallback >= 100 && config.execution.ethUsdFallback <= 100_000);
+});
+
+test("unlock progress tracks the wallet balance toward the USD threshold", () => {
+  assert.deepEqual(unlockProgress(0.75, 3000, null), { balanceUsd: null, progress: null });
+  assert.equal(unlockProgress(0.75, 3000, 0).balanceUsd, 0);
+  assert.equal(unlockProgress(0.75, 3000, 0).progress, 0);
+  // 0.000125 ETH at $3000/ETH = $0.375 — exactly half the $0.75 gate.
+  const half = unlockProgress(0.75, 3000, 0.000125);
+  assert.equal(half.balanceUsd, 0.375);
+  assert.ok(Math.abs(half.progress - 0.5) < 1e-9);
+  // At the threshold the progress saturates at 1.
+  const at = unlockProgress(0.75, 3000, 0.00025);
+  assert.equal(at.balanceUsd, 0.75);
+  assert.equal(at.progress, 1);
+  const above = unlockProgress(0.75, 3000, 1);
+  assert.equal(above.progress, 1);
 });
 
 test("zero-gas intelligence and data offerings are never gated", () => {

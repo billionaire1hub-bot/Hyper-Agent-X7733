@@ -204,7 +204,9 @@ export const config = {
     enabled: bool(process.env.OUTREACH_ENABLED, true),
     intervalSeconds: clamp(num(process.env.OUTREACH_INTERVAL_SECONDS, 600), 120, 3600),
     cycleBudgetMs: clamp(num(process.env.OUTREACH_BUDGET_MS, 40000), 10000, 50000),
-    dailyCap: clamp(num(process.env.OUTREACH_DAILY_CAP, 12), 1, 20),
+    // Maxed at the clamp ceiling: micro-earnings are the priority right now,
+    // so the daily pitch budget is fully aggressive.
+    dailyCap: clamp(num(process.env.OUTREACH_DAILY_CAP, 20), 1, 20),
     maxTargetsPerCycle: clamp(num(process.env.OUTREACH_MAX_TARGETS, 5), 1, 5),
     // 10 instead of 25: micro-earnings matter while the wallet starts from
     // zero, so nearly every contactable target passes the gate.
@@ -301,6 +303,14 @@ export const config = {
         process.env.X_OAUTH2_REFRESH_TOKEN,
         process.env.TWITTER_OAUTH2_REFRESH_TOKEN
       ),
+    },
+    // Auto-upgrade rule: once the payout wallet's earnings cover the cheapest
+    // paid X tier (Basic, $100/month), the agent flags the upgrade so the
+    // operator can flip the plan; X pitching then resumes seamlessly because
+    // the cycle already retries X every round and clears xCredits on success.
+    xAutoUpgrade: {
+      enabled: bool(process.env.X_AUTO_UPGRADE, true),
+      thresholdUsd: clamp(num(process.env.X_AUTO_UPGRADE_THRESHOLD_USD, 100), 10, 1000),
     },
   },
 
