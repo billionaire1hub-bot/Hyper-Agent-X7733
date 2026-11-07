@@ -331,6 +331,17 @@ export const config = {
     },
   },
 
+  // Direct-earning bounty radar: read-only scans of verified public task
+  // feeds (GitHub bounty-labeled issues are the primary source), filtered to
+  // work the agent can actually deliver. Payouts route to the agent wallet
+  // through each platform's own claim flow.
+  bounties: {
+    enabled: bool(process.env.BOUNTIES_SCAN, true),
+    query: str(process.env.BOUNTIES_QUERY, "label:bounty is:issue is:open"),
+    limit: clamp(num(process.env.BOUNTIES_MAX, 6), 1, 15),
+    ttlSeconds: clamp(num(process.env.BOUNTIES_TTL_SECONDS, 6 * 3600), 900, 86400),
+  },
+
   store: {
     url: str(process.env.UPSTASH_REDIS_REST_URL).replace(/\/+$/, ""),
     token: str(process.env.UPSTASH_REDIS_REST_TOKEN),

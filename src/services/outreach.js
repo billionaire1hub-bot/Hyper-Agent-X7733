@@ -36,6 +36,7 @@ import {
 import { executeAcpJob } from "./pipeline.js";
 import { checkAgentIdle } from "./social.js";
 import { postTweet, xConfigured } from "./x.js";
+import { bountyStatus } from "./bounties.js";
 
 const LOCK_TTL_SECONDS = 300;
 const FAILED_SEND_BACKOFF_MS = 6 * 60 * 60 * 1000;
@@ -1362,6 +1363,7 @@ export async function outreachStatus() {
     null
   );
   const xUpgrade = await xAutoUpgradeStatus({ ethBalance });
+  const bounties = await withFallback(bountyStatus(), 8000, null);
   return {
     enabled: config.outreach.enabled,
     aiConfigured: aiConfigured(),
@@ -1393,6 +1395,13 @@ export async function outreachStatus() {
       progress: unlock?.progress ?? null,
     },
     xAutoUpgrade: xUpgrade,
+    bounties: bounties || {
+      enabled: config.bounties.enabled,
+      scannedAt: null,
+      total: null,
+      opportunities: [],
+      errors: [],
+    },
     publicBaseUrlConfigured: Boolean(config.publicBaseUrl),
     publicUrl: publicUrl.url,
     publicUrlSource: publicUrl.source,

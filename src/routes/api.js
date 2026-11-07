@@ -33,6 +33,7 @@ import { outreachStatus, runOutreachCycle } from "../services/outreach.js";
 import { currentPricing, issueQuote, quoteEnvelope, quotePublicJSON } from "../services/pricing.js";
 import { revenueStatus, runRevenueCycle, subscriptionStatus } from "../services/revenue.js";
 import { referralStatus } from "../services/referrals.js";
+import { bountyScan } from "../services/bounties.js";
 
 export const router = express.Router();
 const isTruthy = (value) => value === true || /^(1|true|yes)$/i.test(String(value ?? ""));
@@ -501,6 +502,25 @@ router.all("/api/cron/sweep", requireCronSecret, async (req, res, next) => {
   try {
     const summary = await sweepJobs({ limit: 10 });
     res.json({ success: true, ...summary, timestamp: new Date().toISOString() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/api/bounties", async (req, res, next) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const status = await bountyScan({ refresh: req.query.refresh === "1" });
+    res.json({ success: true, bounties: status, timestamp: new Date().toISOString() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.all("/api/cron/bounty", requireCronSecret, async (req, res, next) => {
+  try {
+    const status = await bountyScan({ refresh: true });
+    res.json({ success: true, ...status, timestamp: new Date().toISOString() });
   } catch (error) {
     next(error);
   }

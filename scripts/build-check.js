@@ -247,8 +247,9 @@ check(
   "outreach runs near-continuously and social covers the day",
   (vercel.crons || []).filter((cron) => cron.path === "/api/cron/social").length === 4 &&
     (vercel.crons || []).filter((cron) => cron.path === "/api/cron/outreach").length === 12 &&
-    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/intake").length === 4,
-  "4 social slots + 12 two-hourly outreach slots + 4 six-hourly intake slots"
+    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/intake").length === 4 &&
+    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/bounty").length === 4,
+  "4 social slots + 12 two-hourly outreach slots + 4 six-hourly intake slots + 4 bounty radar scans"
 );
 check(
   "ACP intake wired",
@@ -532,6 +533,23 @@ check(
   storeSource.includes('xAutoUpgradeNotified: () => key("x:autoupgrade:notified")') &&
     outreachSource.includes("storeHelpers.xAutoUpgradeNotified"),
   "the one-time 'wallet covers the cheapest X plan' notification key exists and is written by the outreach status path"
+);
+const bountiesSource = await readFile(path.join(root, "src/services/bounties.js"), "utf8");
+check(
+  "the legal bounty radar scans verified public feeds for direct earnings",
+  bountiesSource.includes("api.github.com/search/issues") &&
+    configSource.includes('"label:bounty is:issue is:open"') &&
+    bountiesSource.includes("export function rewardHint") &&
+    bountiesSource.includes("export function bountyScore") &&
+    bountiesSource.includes("storeHelpers.bountyScan()") &&
+    storeSource.includes('bountyScan: () => key("bounty:scan")') &&
+    configSource.includes("BOUNTIES_QUERY") &&
+    configSource.includes("BOUNTIES_SCAN") &&
+    routesSource.includes('router.get("/api/bounties"') &&
+    routesSource.includes('router.all("/api/cron/bounty"') &&
+    outreachSource.includes("bountyStatus()") &&
+    outreachSource.includes("bounties: bounties || {"),
+  "GitHub bounty-labeled issue search is the primary feed; scans are cached in the store, filtered to catalogue-relevant work, cron-refreshed 4x/day, and surfaced on GET /api/bounties and in the outreach status pane"
 );
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(
