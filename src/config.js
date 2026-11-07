@@ -244,6 +244,11 @@ export const config = {
     // count, and once a cycle has seen it that number wins; this only covers
     // the very first cycle and the case where every page request failed.
     directoryMaxPages: clamp(num(process.env.OUTREACH_DIRECTORY_MAX_PAGES, 900), 1, 2000),
+    // Off by default: the mass directory sweep collected hundreds of X-only
+    // agents that can never be pitched (X is frozen), crowding out the few
+    // A2A-reachable targets. Discovery now focuses on sources that publish a
+    // verifiable A2A endpoint (index, on-chain registry, allowlist).
+    directorySweep: bool(process.env.OUTREACH_DIRECTORY_SWEEP, false),
     maxCandidates: clamp(num(process.env.OUTREACH_MAX_CANDIDATES, 40), 5, 200),
     // Doubled from 12: probe twice as many agent cards per cycle for live A2A
     // endpoints so micro-gigs get captured from the long tail of the directory.

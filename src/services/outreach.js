@@ -686,14 +686,30 @@ export async function handleOutreachReply({
   return { handled: true, action: verdict.action, text: reply, session };
 }
 
-async function eligibleCandidates(discovery, { now, limit, optedOut }) {
+/**
+ * The channel a candidate can actually be pitched on right now. A2A needs a
+ * verified endpoint (discovery only keeps one once the agent card answered or
+ * the target is allowlisted). X counts only while the account is configured,
+ * enabled and not credit-exhausted — otherwise an X-only candidate is dead
+ * weight that must never consume a pitch slot.
+ */
+export function candidateLiveChannel(candidate, { xUsable = false } = {}) {
+  if (candidate?.endpoint) return "a2a";
+  if (candidate?.twitter && xUsable) return "x";
+  return null;
+}
+
+async function eligibleCandidates(discovery, { now, limit, optedOut, xUsable = false }) {
   const result = [];
-  // Candidates arrive score-sorted. A sweep reads far more agents than one cycle
-  // can act on, and each check is a store read, so only the scored head is
-  // examined instead of every candidate in the merged population.
-  for (const candidate of discovery.candidates.slice(0, config.outreach.maxCandidates)) {
+  // Keep only candidates with a live transmission channel, then put A2A targets
+  // first so a working channel is never crowded out of the scored head by
+  // X-only agents whose channel is dead. This is what turns collected scanning
+  // data into actual submitted pitches.
+  const pitchable = discovery.candidates.filter((candidate) => candidateLiveChannel(candidate, { xUsable }));
+  const rank = (candidate) => (candidateLiveChannel(candidate, { xUsable }) === "a2a" ? 1 : 0);
+  pitchable.sort((a, b) => rank(b) - rank(a) || (b.score || 0) - (a.score || 0));
+  for (const candidate of pitchable.slice(0, config.outreach.maxCandidates)) {
     if (result.length >= limit) break;
-    if (!candidate.contactable) continue;
     if ((candidate.score || 0) < config.outreach.minScore) continue;
     if (optedOut.has(candidate.key)) continue;
     const contact = await loadContact(candidate.key);
@@ -792,8 +808,13 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
     const remaining = Math.max(0, config.outreach.dailyCap - dailyPitchCount(state));
     const limit = Math.min(config.outreach.maxTargetsPerCycle, remaining);
     const optedOut = await optedOutKeys();
-    const eligible = await eligibleCandidates(discovery, { now, limit, optedOut });
+    const xUsable = config.outreach.xPitchEnabled && xConfigured() && !state.xCredits;
+    const eligible = await eligibleCandidates(discovery, { now, limit, optedOut, xUsable });
     summary.eligible = eligible.length;
+    summary.xUsable = xUsable;
+    summary.channelBlocked = discovery.candidates.filter(
+      (candidate) => candidate.contactable && !candidateLiveChannel(candidate, { xUsable })
+    ).length;
 
     if (!eligible.length) {
       state.lastAttemptAt = nowIso();
@@ -801,7 +822,12 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
       return {
         ...summary,
         status: "no_targets",
-        reason: discovery.errors.some((error) => error.source === "index") ? "NO_CONTACTABLE_TARGETS" : "NO_MATCHES",
+        reason:
+          summary.channelBlocked > 0
+            ? "NO_LIVE_CHANNEL"
+            : discovery.errors.some((error) => error.source === "index")
+              ? "NO_CONTACTABLE_TARGETS"
+              : "NO_MATCHES",
       };
     }
 

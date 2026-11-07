@@ -336,6 +336,7 @@ test("one discovery cycle sweeps consecutive directory pages and reports where t
     directoryPage: 39,
     directoryPages: 2,
     directoryMaxPages: 40,
+    directorySweep: true,
   });
 
   assert.deepEqual(result.sources.directoryPages, [39, 40]);
@@ -430,6 +431,7 @@ test("a directory page that fails does not stop the rest of the sweep", async ()
     directoryPage: 39,
     directoryPages: 3,
     directoryMaxPages: 40,
+    directorySweep: true,
   });
 
   assert.deepEqual(result.sources.directoryPages, [39, 40, 1]);

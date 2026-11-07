@@ -572,6 +572,17 @@ check(
     routesSource.includes("executionStatus"),
   "with GITHUB_TOKEN set the executor verifies repo age/community/size (rejecting same-day fake networks), skips already-solved issues, forks, branches, commits deliverables and opens a Fixes-# PR with the payout wallet; claim steps (star + comment) follow the repo's documented policy; errors retry with backoff and state persists per issue"
 );
+check(
+  "outreach submits pitches instead of only collecting scanning data",
+  configSource.includes("OUTREACH_DIRECTORY_SWEEP") &&
+    discoverySource.includes("directorySweep = config.outreach.directorySweep") &&
+    discoverySource.includes("directorySweep\n    ? directoryPageRange") &&
+    outreachSource.includes("export function candidateLiveChannel") &&
+    outreachSource.includes("candidateLiveChannel(candidate, { xUsable })") &&
+    outreachSource.includes("NO_LIVE_CHANNEL") &&
+    outreachSource.includes("summary.channelBlocked"),
+  "the mass directory sweep is off by default; candidate selection keeps only live-channel targets (verified A2A endpoint, or X while usable) and ranks A2A first so dead X-only agents never crowd out pitchable targets; a cycle with candidates but no live channel reports NO_LIVE_CHANNEL instead of silently collecting"
+);
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(
   "Virtuals directory pagination follows the live API contract",
@@ -600,7 +611,7 @@ check(
     outreachSource.includes("directoryMaxPages: sweep.maxPages") &&
     outreachSource.includes("page: discovery.sources?.nextPage || 1") &&
     outreachSource.includes("pageCount: discovery.sources?.directorySweepPages || null") &&
-    outreachSource.includes("discovery.candidates.slice(0, config.outreach.maxCandidates)") &&
+    outreachSource.includes("pitchable.slice(0, config.outreach.maxCandidates)") &&
     storeSource.includes('outreachSweep: () => key("outreach:directory:sweep")') &&
     configSource.includes("OUTREACH_DIRECTORY_PAGES") &&
     configSource.includes("OUTREACH_DIRECTORY_MAX_PAGES") &&

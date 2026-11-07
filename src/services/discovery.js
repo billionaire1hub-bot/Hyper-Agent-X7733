@@ -621,6 +621,7 @@ export async function discoverTargets({
   directoryPage = null,
   directoryPages = config.outreach.directoryPages,
   directoryMaxPages = config.outreach.directoryMaxPages,
+  directorySweep = config.outreach.directorySweep,
 } = {}) {
   const errors = [];
   const collected = [];
@@ -672,12 +673,14 @@ export async function discoverTargets({
   // of consecutive pages and the caller stores where the next cycle continues.
   // The sweep walks the whole network instead of being stuck on a static
   // subset. Pages are fetched in parallel to stay inside the cycle budget.
-  const pages = directoryPageRange({
-    start: directoryPage,
-    count: directoryPages,
-    max: directoryMaxPages,
-    now,
-  });
+  const pages = directorySweep
+    ? directoryPageRange({
+        start: directoryPage,
+        count: directoryPages,
+        max: directoryMaxPages,
+        now,
+      })
+    : [];
   const directoryResults = await Promise.allSettled(
     pages.map((page) => fetchVirtualsDirectoryPage({ page }))
   );
