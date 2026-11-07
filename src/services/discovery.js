@@ -613,6 +613,7 @@ export function directoryPageRange({ start = null, count = 1, max = 1, now = Dat
 export async function discoverTargets({
   scanJobs = config.outreach.scanJobs,
   indexUrl = config.outreach.indexUrl,
+  indexUrls = config.outreach.indexUrls,
   indexToken = config.outreach.indexToken,
   targets = config.outreach.targets,
   cardLimit = config.outreach.cardProbes,
@@ -645,14 +646,23 @@ export async function discoverTargets({
   }
 
   let indexAgents = 0;
-  if (indexUrl) {
-    try {
-      const index = await fetchIndex({ url: indexUrl, token: indexToken });
-      indexAgents = index.agents.length;
-      collected.push(...index.agents);
-    } catch (error) {
-      errors.push({ source: "index", code: error.code || "OUTREACH_INDEX_FAILED", message: error.message });
+  const indexSources = [];
+  const feeds = [...new Set([...indexUrls, ...(indexUrl ? [indexUrl] : [])])];
+  const indexResults = await Promise.allSettled(
+    feeds.map(async (url) => ({ url, agents: (await fetchIndex({ url, token: indexToken })).agents }))
+  );
+  for (const outcome of indexResults) {
+    if (outcome.status === "fulfilled") {
+      indexAgents += outcome.value.agents.length;
+      indexSources.push({ url: outcome.value.url, agents: outcome.value.agents.length });
+      collected.push(...outcome.value.agents);
+      continue;
     }
+    errors.push({
+      source: "index",
+      code: outcome.reason?.code || "OUTREACH_INDEX_FAILED",
+      message: outcome.reason?.message || "index fetch failed",
+    });
   }
 
   let directoryAgents = 0;
@@ -833,6 +843,7 @@ export async function discoverTargets({
   logger.info("outreach discovery finished", {
     allowlist: targets.length,
     index: indexAgents,
+    indexFeeds: indexSources.length,
     directory: directoryAgents,
     directoryPages: pages.join(","),
     directorySweepPages: directoryPageCount || directoryMaxPages,
@@ -847,6 +858,7 @@ export async function discoverTargets({
     sources: {
       allowlist: targets.length,
       index: indexAgents,
+      indexSources,
       directory: directoryAgents,
       directoryPages: pages,
       directorySweepPages: directoryPageCount,

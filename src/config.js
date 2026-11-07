@@ -218,6 +218,21 @@ export const config = {
       process.env.OUTREACH_INDEX_TOKEN || process.env.ACP_API_KEY ? "https://api.acp.virtuals.io/agents" : ""
     ),
     indexToken: str(process.env.OUTREACH_INDEX_TOKEN) || str(process.env.ACP_API_KEY),
+    // Every feed is swept in parallel each cycle: the Virtuals public
+    // directory plus any alternative agent directories the operator points at
+    // (OUTREACH_INDEX_URLS is comma-separated; the authenticated ACP registry
+    // joins automatically when an ACP API key exists).
+    indexUrls: [
+      ...new Set(
+        [
+          ...list(process.env.OUTREACH_INDEX_URLS),
+          ...list(process.env.OUTREACH_INDEX_URL),
+          ...(process.env.OUTREACH_INDEX_TOKEN || process.env.ACP_API_KEY
+            ? ["https://api.acp.virtuals.io/agents"]
+            : []),
+        ]
+      ),
+    ],
     targets: list(process.env.OUTREACH_TARGETS),
     keywords: list(process.env.OUTREACH_KEYWORDS),
     xPitchEnabled: bool(process.env.OUTREACH_X_PITCH, true),
@@ -232,7 +247,7 @@ export const config = {
     maxCandidates: clamp(num(process.env.OUTREACH_MAX_CANDIDATES, 40), 5, 200),
     // Doubled from 12: probe twice as many agent cards per cycle for live A2A
     // endpoints so micro-gigs get captured from the long tail of the directory.
-    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 24), 3, 40),
+    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 32), 3, 40),
     sessionTtlSeconds: clamp(num(process.env.OUTREACH_SESSION_TTL_SECONDS, 300), 120, 600),
     extensionSeconds: clamp(num(process.env.OUTREACH_EXTENSION_SECONDS, 120), 30, 300),
     maxTurns: clamp(num(process.env.OUTREACH_MAX_TURNS, 6), 2, 12),

@@ -375,6 +375,37 @@ test("the directory's reported page count drives the sweep bound", async () => {
   assert.equal(legacy[0].name, "Sized Agent");
 });
 
+test("every configured index feed is swept in parallel and a failing feed is isolated", async () => {
+  const OTHER_INDEX = `0x${"cd".repeat(20)}`;
+  stubFetch((url) => {
+    if (url.includes("feed-a.example")) {
+      return {
+        body: [
+          { name: "Alpha Index Agent", description: "research desk", walletAddress: OTHER_INDEX, url: "https://alpha.example.com" },
+        ],
+      };
+    }
+    if (url.includes("feed-b.example")) return { status: 503, body: {} };
+    if (url.includes("acpx.virtuals.io")) return { body: { data: [] } };
+    return { body: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "rpc unavailable in test" } } };
+  });
+
+  const result = await discovery.discoverTargets({
+    scanJobs: 1,
+    targets: [],
+    indexUrl: "",
+    indexUrls: ["https://feed-a.example/agents", "https://feed-b.example/agents"],
+    directoryPage: 1,
+    directoryPages: 1,
+    directoryMaxPages: 1,
+  });
+
+  assert.equal(result.sources.index, 1, "the healthy feed contributes its agents");
+  assert.deepEqual(result.sources.indexSources, [{ url: "https://feed-a.example/agents", agents: 1 }]);
+  assert.ok(result.errors.some((error) => error.source === "index"), "the failing feed is reported, not fatal");
+  assert.ok(result.candidates.some((candidate) => candidate.name === "Alpha Index Agent"));
+});
+
 test("a directory page that fails does not stop the rest of the sweep", async () => {
   stubFetch((url) => {
     const page = new URL(url).searchParams.get("pagination[page]");

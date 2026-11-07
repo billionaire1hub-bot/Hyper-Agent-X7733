@@ -540,9 +540,11 @@ check(
     discoverySource.includes("pagination[pageSize]=") &&
     !discoverySource.includes("page=${Math.max") &&
     discoverySource.includes('retries: 3, service: "virtuals-directory"') &&
+    configSource.includes("OUTREACH_INDEX_URLS") &&
     configSource.includes("OUTREACH_INDEX_URL") &&
-    configSource.includes("process.env.ACP_API_KEY"),
-  "nested pagination params + three retries on transient upstream 5xx; authenticated index only used when a token exists"
+    configSource.includes("process.env.ACP_API_KEY") &&
+    discoverySource.includes("indexSources"),
+  "nested pagination params + three retries on transient upstream 5xx; authenticated index only used when a token exists; every OUTREACH_INDEX_URLS feed is swept in parallel with per-source error isolation"
 );
 check(
   "directory discovery sweeps the whole network instead of one fixed page",

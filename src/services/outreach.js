@@ -1409,7 +1409,8 @@ export async function outreachStatus() {
     },
     discovery: {
       indexUrl: config.outreach.indexUrl || null,
-      indexConfigured: Boolean(config.outreach.indexToken),
+      indexUrls: config.outreach.indexUrls,
+      indexConfigured: Boolean(config.outreach.indexToken) || config.outreach.indexUrls.length > 0,
       allowlistTargets: config.outreach.targets.length,
       scanJobs: config.outreach.scanJobs,
       directoryUrl: config.outreach.directoryUrl,
