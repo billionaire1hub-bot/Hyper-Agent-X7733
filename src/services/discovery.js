@@ -266,7 +266,9 @@ export async function fetchVirtualsDirectoryPage({
   const payload = await fetchJSON(
     `${target.base}${separator}pagination[page]=${pageNumber}&pagination[pageSize]=${size}`,
     {},
-    { timeoutMs: 8000, retries: 2, service: "virtuals-directory" }
+    // Vercel egress to acpx.virtuals.io throttles intermittently, so the
+    // timeout is generous and every page gets three attempts.
+    { timeoutMs: 12000, retries: 3, service: "virtuals-directory" }
   );
   const container = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
   const agents = container
