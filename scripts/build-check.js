@@ -627,6 +627,13 @@ check(
   "OAuth 2.0 user token first with a /2/oauth2/token refresh attempt, then OAuth 1.0a; a confirmed auth failure skips the rest of the cycle's X-only targets without writing cooldowns"
 );
 check(
+  "the rotated OAuth 2.0 refresh token is persisted for later mints",
+  xSource.includes("refreshToken: String(payload.refresh_token") &&
+    xSource.includes("loadCachedOAuth2Entry()") &&
+    xSource.includes("?.refreshToken || config.social.oauth2.refreshToken"),
+  "X rotates the refresh token on every mint; the fresh one is cached and preferred over the env token so the flow survives more than one refresh"
+);
+check(
   "X credit exhaustion is terminal per cycle: no family switching, no cooldowns",
   xSource.includes("creditsDepleted") &&
     xSource.includes('code: "X_CREDITS_DEPLETED"') &&

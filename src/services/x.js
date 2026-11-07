@@ -69,6 +69,8 @@ export function buildOAuth1Header(method, url, overrides = {}) {
 /**
  * Rotated OAuth 2.0 access tokens are cached in memory and persisted in the
  * store so a serverless cold start does not re-mint a token on every post.
+ * X also rotates the refresh token on every mint, so the entry keeps the
+ * latest refresh token even after the access token itself goes stale.
  */
 let oauth2TokenCache = null;
 
@@ -77,26 +79,34 @@ const oauth2TokenFresh = (entry) => {
   return (entry.expiresAtMs || 0) - Date.now() > 60_000 ? entry : null;
 };
 
-async function loadCachedOAuth2Token() {
-  if (!oauth2TokenFresh(oauth2TokenCache)) oauth2TokenCache = null;
+async function loadCachedOAuth2Entry() {
   if (!oauth2TokenCache) {
     try {
-      oauth2TokenCache = oauth2TokenFresh(await store.get(storeHelpers.xOauth2Token()));
+      oauth2TokenCache = (await store.get(storeHelpers.xOauth2Token())) || null;
     } catch (error) {
       logger.warn("x oauth2 token cache read failed", { message: error.message });
       oauth2TokenCache = null;
     }
   }
-  return oauth2TokenCache?.token || null;
+  return oauth2TokenCache;
+}
+
+async function loadCachedOAuth2Token() {
+  const entry = await loadCachedOAuth2Entry();
+  return oauth2TokenFresh(entry)?.token || null;
 }
 
 /**
  * POST /2/oauth2/token with grant_type=refresh_token (OAuth 2.0 confidential
  * client). Returns true when a fresh access token was minted and cached.
+ * The rotated refresh token from the response is persisted too, because X
+ * invalidates the previous one on every mint.
  */
 async function refreshOAuth2AccessToken() {
-  const { clientId, clientSecret, refreshToken } = config.social.oauth2;
-  if (!clientId || !clientSecret || !refreshToken) return false;
+  const { clientId, clientSecret } = config.social.oauth2;
+  if (!clientId || !clientSecret) return false;
+  const refreshToken = (await loadCachedOAuth2Entry())?.refreshToken || config.social.oauth2.refreshToken;
+  if (!refreshToken) return false;
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   let payload = null;
   try {
@@ -124,6 +134,7 @@ async function refreshOAuth2AccessToken() {
   const expiresInSeconds = Math.max(0, Number(payload.expires_in) || 3600);
   const entry = {
     token: String(payload.access_token),
+    refreshToken: String(payload.refresh_token || refreshToken),
     expiresAtMs: Date.now() + (expiresInSeconds - 60) * 1000,
   };
   oauth2TokenCache = entry;
