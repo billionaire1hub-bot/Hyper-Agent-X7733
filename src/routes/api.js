@@ -34,6 +34,8 @@ import { currentPricing, issueQuote, quoteEnvelope, quotePublicJSON } from "../s
 import { revenueStatus, runRevenueCycle, subscriptionStatus } from "../services/revenue.js";
 import { referralStatus } from "../services/referrals.js";
 import { bountyScan } from "../services/bounties.js";
+import { executionStatus, runExecutionCycle } from "../services/bounty-executor.js";
+import { store, storeHelpers } from "../lib/store.js";
 
 export const router = express.Router();
 const isTruthy = (value) => value === true || /^(1|true|yes)$/i.test(String(value ?? ""));
@@ -511,7 +513,8 @@ router.get("/api/bounties", async (req, res, next) => {
   try {
     res.setHeader("Cache-Control", "no-store");
     const status = await bountyScan({ refresh: req.query.refresh === "1" });
-    res.json({ success: true, bounties: status, timestamp: new Date().toISOString() });
+    const execution = await executionStatus();
+    res.json({ success: true, bounties: status, execution, timestamp: new Date().toISOString() });
   } catch (error) {
     next(error);
   }
@@ -520,7 +523,8 @@ router.get("/api/bounties", async (req, res, next) => {
 router.all("/api/cron/bounty", requireCronSecret, async (req, res, next) => {
   try {
     const status = await bountyScan({ refresh: true });
-    res.json({ success: true, ...status, timestamp: new Date().toISOString() });
+    const execution = await runExecutionCycle({ force: req.query.force === "1" });
+    res.json({ success: true, ...status, execution, timestamp: new Date().toISOString() });
   } catch (error) {
     next(error);
   }

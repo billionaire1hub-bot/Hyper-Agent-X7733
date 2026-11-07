@@ -340,6 +340,13 @@ export const config = {
     query: str(process.env.BOUNTIES_QUERY, "label:bounty is:issue is:open"),
     limit: clamp(num(process.env.BOUNTIES_MAX, 6), 1, 15),
     ttlSeconds: clamp(num(process.env.BOUNTIES_TTL_SECONDS, 6 * 3600), 900, 86400),
+    githubToken: str(process.env.GITHUB_TOKEN, ""),
+    execute: bool(process.env.BOUNTIES_EXECUTE, true),
+    starOnClaim: bool(process.env.BOUNTIES_STAR_ON_CLAIM, true),
+    maxOpenPrs: clamp(num(process.env.BOUNTIES_MAX_OPEN_PRS, 3), 1, 10),
+    payoutWallet: str(process.env.BOUNTY_PAYOUT_WALLET, "0x3D8e69cA6B52dA775433D164B19E4104053E5d05"),
+    minRepoAgeDays: clamp(num(process.env.BOUNTIES_MIN_REPO_AGE_DAYS, 30), 1, 365),
+    minStars: clamp(num(process.env.BOUNTIES_MIN_STARS, 1), 0, 100),
   },
 
   store: {

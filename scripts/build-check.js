@@ -551,6 +551,27 @@ check(
     outreachSource.includes("bounties: bounties || {"),
   "GitHub bounty-labeled issue search is the primary feed; scans are cached in the store, filtered to catalogue-relevant work, cron-refreshed 4x/day, and surfaced on GET /api/bounties and in the outreach status pane"
 );
+const executorSource = await readFile(path.join(root, "src/services/bounty-executor.js"), "utf8");
+check(
+  "the bounty executor autonomously claims and submits PRs only for verified repos",
+  executorSource.includes("api.github.com") &&
+    executorSource.includes("export function verifyRepoMeta") &&
+    executorSource.includes("export async function executeIssue") &&
+    executorSource.includes("export async function runExecutionCycle") &&
+    executorSource.includes("isAlreadyExists") &&
+    executorSource.includes("I claim this bounty") &&
+    executorSource.includes("Fixes #") &&
+    executorSource.includes("bountyExec()") &&
+    executorSource.includes("payoutWallet") &&
+    configSource.includes("GITHUB_TOKEN") &&
+    configSource.includes("BOUNTIES_EXECUTE") &&
+    configSource.includes("BOUNTY_PAYOUT_WALLET") &&
+    configSource.includes("BOUNTIES_MIN_REPO_AGE_DAYS") &&
+    storeSource.includes('bountyExec: () => key("bounty:exec")') &&
+    routesSource.includes("runExecutionCycle") &&
+    routesSource.includes("executionStatus"),
+  "with GITHUB_TOKEN set the executor verifies repo age/community/size (rejecting same-day fake networks), skips already-solved issues, forks, branches, commits deliverables and opens a Fixes-# PR with the payout wallet; claim steps (star + comment) follow the repo's documented policy; errors retry with backoff and state persists per issue"
+);
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(
   "Virtuals directory pagination follows the live API contract",
