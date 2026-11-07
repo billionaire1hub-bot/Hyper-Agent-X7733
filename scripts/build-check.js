@@ -643,8 +643,11 @@ check(
     outreachSource.includes("x_credits_skipped") &&
     outreachSource.includes("x_credits_depleted") &&
     outreachSource.includes("latest.xCredits = null") &&
-    outreachSource.includes("xCredits: state.xCredits || null"),
-  "a plan-level 'credits depleted' response throws X_CREDITS_DEPLETED without trying other credential families, skips the cycle's remaining X sends, writes no contact cooldowns, and clears itself after the next successful pitch"
+    outreachSource.includes("xCredits: state.xCredits || null") &&
+    outreachSource.includes("payload.detail || payload.title") &&
+    outreachSource.includes("detail: xCreditsDepleted.detail || null") &&
+    outreachSource.includes("detail: xAuthFailed.detail || null"),
+  "a plan-level 'credits depleted' response throws X_CREDITS_DEPLETED without trying other credential families, skips the cycle's remaining X sends, writes no contact cooldowns, and clears itself after the next successful pitch; the X response body travels with auth/credits failures so the operator can see the real reason"
 );
 check(
   "zero-gas intelligence suite untouched by the gate",

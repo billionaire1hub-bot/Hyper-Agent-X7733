@@ -366,10 +366,15 @@ export async function sendXPitch({ handle, text }) {
     const tweet = await postTweet(text);
     return { ok: true, tweetId: tweet.id, url: tweet.url };
   } catch (error) {
+    const payload = error.details?.payload;
     return {
       ok: false,
       error: sanitizeText(error.message, 200),
       code: error.code || null,
+      detail:
+        payload && typeof payload === "object"
+          ? sanitizeText(String(payload.detail || payload.title || ""), 300) || null
+          : null,
       authError: error.code === "X_HTTP_401" || error.code === "X_HTTP_403",
       creditsDepleted: error.code === "X_CREDITS_DEPLETED",
     };
@@ -858,11 +863,12 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
           });
           if (!ask.ok) {
             if (ask.creditsDepleted) {
-              xCreditsDepleted = { code: ask.code || "X_CREDITS_DEPLETED", message: ask.error };
+              xCreditsDepleted = { code: ask.code || "X_CREDITS_DEPLETED", message: ask.error, detail: ask.detail };
               const creditState = await loadOutreachState();
               creditState.xCredits = {
                 code: xCreditsDepleted.code,
                 message: sanitizeText(xCreditsDepleted.message, 200),
+                detail: xCreditsDepleted.detail || null,
                 at: nowIso(),
               };
               await saveOutreachState(creditState);
@@ -875,11 +881,12 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
               continue;
             }
             if (ask.authError) {
-              xAuthFailed = { code: ask.code || "X_AUTH_FAILED", message: ask.error };
+              xAuthFailed = { code: ask.code || "X_AUTH_FAILED", message: ask.error, detail: ask.detail };
               const authState = await loadOutreachState();
               authState.xAuth = {
                 code: xAuthFailed.code,
                 message: sanitizeText(xAuthFailed.message, 200),
+                detail: xAuthFailed.detail || null,
                 at: nowIso(),
               };
               await saveOutreachState(authState);
@@ -1135,11 +1142,12 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         // skipped, and the state records it so pitches resume automatically
         // once the free-tier credits reset.
         if (channel === "x" && send.creditsDepleted) {
-          xCreditsDepleted = { code: send.code || "X_CREDITS_DEPLETED", message: send.error };
+          xCreditsDepleted = { code: send.code || "X_CREDITS_DEPLETED", message: send.error, detail: send.detail };
           const creditState = await loadOutreachState();
           creditState.xCredits = {
             code: xCreditsDepleted.code,
             message: sanitizeText(xCreditsDepleted.message, 200),
+            detail: xCreditsDepleted.detail || null,
             at: nowIso(),
           };
           await saveOutreachState(creditState);
@@ -1155,11 +1163,12 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         // cooldown is written, and the failure is remembered in the state so
         // the operator can see it without digging through outcomes.
         if (channel === "x" && send.authError) {
-          xAuthFailed = { code: send.code || "X_AUTH_FAILED", message: send.error };
+          xAuthFailed = { code: send.code || "X_AUTH_FAILED", message: send.error, detail: send.detail };
           const authState = await loadOutreachState();
           authState.xAuth = {
             code: xAuthFailed.code,
             message: sanitizeText(xAuthFailed.message, 200),
+            detail: xAuthFailed.detail || null,
             at: nowIso(),
           };
           await saveOutreachState(authState);

@@ -111,6 +111,7 @@ test("sendXPitch flags credential rejections as auth errors for the outreach cyc
     assert.equal(result.authError, true);
     assert.equal(result.code, "X_HTTP_401");
     assert.match(result.error, /x-api: Unauthorized/);
+    assert.equal(result.detail, "Unauthorized", "the X response body travels with the failure");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -268,7 +268,7 @@ async function xRequest(method, path, { body, timeoutMs = 15000 } = {}) {
       }
 
       if (authFailure(response.status)) {
-        rejected = { set: attempt.name, status: response.status, message };
+        rejected = { set: attempt.name, status: response.status, message, payload };
         logger.info("x credential family rejected, trying the next one", {
           rejected: attempt.name,
           status: response.status,
@@ -289,7 +289,12 @@ async function xRequest(method, path, { body, timeoutMs = 15000 } = {}) {
       }
       return payload;
     }
-    throw xHttpError(rejected?.status || 401, rejected?.message || "Unauthorized", null, null);
+    throw xHttpError(
+      rejected?.status || 401,
+      rejected?.message || "Unauthorized",
+      rejected?.payload ?? null,
+      null
+    );
   } catch (error) {
     if (error instanceof AppError) throw error;
     const message =

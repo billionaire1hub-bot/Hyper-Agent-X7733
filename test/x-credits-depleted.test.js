@@ -66,6 +66,7 @@ test("sendXPitch flags credit exhaustion separately from dead credentials", asyn
     assert.equal(result.creditsDepleted, true);
     assert.equal(result.authError, false);
     assert.equal(result.code, "X_CREDITS_DEPLETED");
+    assert.equal(result.detail, "Your plan ran out of monthly credits; credits depleted");
   } finally {
     globalThis.fetch = originalFetch;
   }
