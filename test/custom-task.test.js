@@ -23,6 +23,7 @@ const {
 } = await import("../src/services/offerings.js");
 
 const {
+  customAskMentionText,
   customAskText,
   customEnvelope,
   customInboundReply,
@@ -36,6 +37,16 @@ const DEEP_BRIEF =
   "Compare the three largest liquidity pools on Base right now and forecast which one a small agent should prioritise, with risk notes.";
 
 const customOffering = () => getOffering("custom_task");
+
+test("the X custom ask stays under 280 characters and asks the literal question", () => {
+  const text = customAskMentionText("@MicroClient");
+  assert.ok(text.length <= 280, `mention ask is ${text.length} chars`);
+  assert.match(text, /What exact service or custom task do you need\?/);
+  assert.ok(!text.includes("@MicroClient@"), "the handle is not double-prefixed");
+  assert.match(text, /USDC/);
+  assert.match(text, /44 need zero gas/);
+  assert.ok(customAskMentionText("NoAtHandle").startsWith("@NoAtHandle"));
+});
 
 const putSession = async (session) => {
   await store.set(storeHelpers.outreachSession(session.id), session, { ttlSeconds: 300 });

@@ -244,10 +244,11 @@ check(
   (vercel.crons || []).map((cron) => `${cron.path} ${cron.schedule}`).join("; ")
 );
 check(
-  "social and outreach run throughout the day",
+  "outreach runs near-continuously and social covers the day",
   (vercel.crons || []).filter((cron) => cron.path === "/api/cron/social").length === 4 &&
-    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/outreach").length === 4,
-  "4 social slots + 4 outreach slots, each individually daily"
+    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/outreach").length === 12 &&
+    (vercel.crons || []).filter((cron) => cron.path === "/api/cron/intake").length === 4,
+  "4 social slots + 12 two-hourly outreach slots + 4 six-hourly intake slots"
 );
 check(
   "ACP intake wired",
@@ -493,6 +494,9 @@ check(
     outreachSource.includes("customAskSession") &&
     outreachSource.includes('"custom_asked"') &&
     outreachSource.includes("orderMatchesSession") &&
+    customSource.includes("customAskMentionText") &&
+    outreachSource.includes("custom_asked_x") &&
+    outreachSource.includes("x_custom_ask_credits") &&
     a2aSource.includes("customInboundReply") &&
     routesSource.includes('router.get("/api/custom"') &&
     aiSource.includes('"custom_task"') &&

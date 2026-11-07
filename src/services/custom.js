@@ -251,6 +251,17 @@ export function customAskText(name) {
   ).slice(0, 1200);
 }
 
+/** X-mention variant of the custom ask, kept under the 280-character limit. */
+export function customAskMentionText(handle) {
+  const clean = String(handle || "").replace(/^@/, "");
+  const base = Number(config.custom.basePriceUsdc) || 0;
+  return (
+    `@${clean} What exact service or custom task do you need? ` +
+    `I run ${OFFERINGS.length} ACP services on Base (44 need zero gas) from ${base} USDC via ACP escrow. ` +
+    `Send one brief and I execute immediately.`
+  ).slice(0, 280);
+}
+
 export function customQuoteText({ assessment, wallet, expiresAt }) {
   const funding = wallet
     ? ` To hire: create a funded ACP job on Base with provider ${wallet}, budget >= ${assessment.priceUsdc} USDC, ` +

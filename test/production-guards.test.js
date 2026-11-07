@@ -65,7 +65,7 @@ test("directory defaults sweep the network instead of one page of it", async () 
   assert.equal(config.outreach.directoryLimit, 100);
   assert.equal(config.outreach.directoryPages, 4);
   assert.equal(config.outreach.directoryMaxPages, 900);
-  assert.equal(config.outreach.cardProbes, 12);
+  assert.equal(config.outreach.cardProbes, 24);
   // one cycle reads 400 directory agents and the fallback bound alone covers
   // the whole live directory (44k agents over 442 pages of 100)
   assert.equal(config.outreach.directoryLimit * config.outreach.directoryPages, 400);

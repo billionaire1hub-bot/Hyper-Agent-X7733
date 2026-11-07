@@ -6,7 +6,7 @@ import { acquireLock, releaseLock, store, storeHelpers } from "../lib/store.js";
 import { agentEthBalance, getAgentAddress } from "../chain/client.js";
 import { aiConfigured, aiHealth, askGrounded, askJSON } from "./ai.js";
 import { activationStatus, loadPublicUrl } from "./activation.js";
-import { customAskText, customQuoteText, normalizeRequirement } from "./custom.js";
+import { customAskMentionText, customAskText, customQuoteText, normalizeRequirement } from "./custom.js";
 import { discoverTargets, INTEL_OFFERINGS } from "./discovery.js";
 import { getAcpJob } from "./escrow.js";
 import { gasUnlockStatus } from "./gas.js";
@@ -828,9 +828,119 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         continue;
       }
       if (analysis.noFit) {
-        if (!config.custom.enabled || !candidate.endpoint) {
+        const xAskAvailable =
+          !candidate.endpoint &&
+          candidate.twitter &&
+          config.outreach.xPitchEnabled &&
+          xConfigured();
+        if (!config.custom.enabled || (!candidate.endpoint && !xAskAvailable)) {
           summary.skipped += 1;
           summary.outcomes.push({ target: candidate.name || candidate.key, action: "no_fit" });
+          continue;
+        }
+        // No catalogue match on an X-only target: ask the literal question so
+        // micro-gigs and custom briefs are captured from every channel, not
+        // just A2A. Dead credentials and exhausted credits degrade the cycle
+        // without cooling the target down.
+        if (!candidate.endpoint) {
+          if (xCreditsDepleted || xAuthFailed) {
+            summary.skipped += 1;
+            summary.outcomes.push({
+              target: candidate.name || candidate.key,
+              action: "x_custom_ask_skipped",
+              error: (xCreditsDepleted || xAuthFailed).message,
+            });
+            continue;
+          }
+          const ask = await sendXPitch({
+            handle: candidate.twitter,
+            text: customAskMentionText(candidate.twitter),
+          });
+          if (!ask.ok) {
+            if (ask.creditsDepleted) {
+              xCreditsDepleted = { code: ask.code || "X_CREDITS_DEPLETED", message: ask.error };
+              const creditState = await loadOutreachState();
+              creditState.xCredits = {
+                code: xCreditsDepleted.code,
+                message: sanitizeText(xCreditsDepleted.message, 200),
+                at: nowIso(),
+              };
+              await saveOutreachState(creditState);
+              summary.outcomes.push({
+                target: candidate.name || candidate.key,
+                action: "x_custom_ask_credits",
+                channel: "x",
+                error: ask.error,
+              });
+              continue;
+            }
+            if (ask.authError) {
+              xAuthFailed = { code: ask.code || "X_AUTH_FAILED", message: ask.error };
+              const authState = await loadOutreachState();
+              authState.xAuth = {
+                code: xAuthFailed.code,
+                message: sanitizeText(xAuthFailed.message, 200),
+                at: nowIso(),
+              };
+              await saveOutreachState(authState);
+              summary.outcomes.push({
+                target: candidate.name || candidate.key,
+                action: "x_custom_ask_auth_failed",
+                channel: "x",
+                error: ask.error,
+              });
+              continue;
+            }
+            await saveContact(candidate.key, {
+              targetName: candidate.name || candidate.key,
+              channel: "x",
+              lastOutcome: "custom_ask_failed",
+              lastContactAt: nowIso(),
+              nextAttemptAt: new Date(Date.now() + FAILED_SEND_BACKOFF_MS).toISOString(),
+              score: candidate.score,
+            });
+            summary.outcomes.push({
+              target: candidate.name || candidate.key,
+              action: "custom_ask_failed",
+              channel: "x",
+              error: ask.error,
+            });
+            continue;
+          }
+          await saveContact(candidate.key, {
+            targetName: candidate.name || candidate.key,
+            channel: "x",
+            twitter: candidate.twitter,
+            lastOutcome: "custom_asked_x",
+            lastContactAt: nowIso(),
+            nextAttemptAt: new Date(Date.now() + config.outreach.cooldownHours * 3600_000).toISOString(),
+            score: candidate.score,
+          });
+          const afterAskX = await loadOutreachState();
+          afterAskX.day = dayKey();
+          afterAskX.dayCount = dailyPitchCount(afterAskX) + 1;
+          afterAskX.totalPitches = (Number(afterAskX.totalPitches) || 0) + 1;
+          afterAskX.lastAttemptAt = nowIso();
+          afterAskX.xAuth = null;
+          afterAskX.xCredits = null;
+          afterAskX.outcomes.push({
+            at: nowIso(),
+            target: candidate.name || candidate.key,
+            score: candidate.score,
+            offeringId: CUSTOM_TASK_OFFERING_ID,
+            action: "custom_asked_x",
+            channel: "x",
+            tweetUrl: ask.url || null,
+          });
+          afterAskX.outcomes = afterAskX.outcomes.slice(-20);
+          await saveOutreachState(afterAskX);
+          summary.asked += 1;
+          summary.outcomes.push({
+            target: candidate.name || candidate.key,
+            action: "custom_asked_x",
+            channel: "x",
+            score: candidate.score,
+          });
           continue;
         }
         const session = customAskSession(candidate);

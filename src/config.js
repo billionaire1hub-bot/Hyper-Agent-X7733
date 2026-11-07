@@ -230,7 +230,9 @@ export const config = {
     // the very first cycle and the case where every page request failed.
     directoryMaxPages: clamp(num(process.env.OUTREACH_DIRECTORY_MAX_PAGES, 900), 1, 2000),
     maxCandidates: clamp(num(process.env.OUTREACH_MAX_CANDIDATES, 40), 5, 200),
-    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 12), 3, 40),
+    // Doubled from 12: probe twice as many agent cards per cycle for live A2A
+    // endpoints so micro-gigs get captured from the long tail of the directory.
+    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 24), 3, 40),
     sessionTtlSeconds: clamp(num(process.env.OUTREACH_SESSION_TTL_SECONDS, 300), 120, 600),
     extensionSeconds: clamp(num(process.env.OUTREACH_EXTENSION_SECONDS, 120), 30, 300),
     maxTurns: clamp(num(process.env.OUTREACH_MAX_TURNS, 6), 2, 12),
