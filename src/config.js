@@ -203,7 +203,11 @@ export const config = {
   outreach: {
     enabled: bool(process.env.OUTREACH_ENABLED, true),
     intervalSeconds: clamp(num(process.env.OUTREACH_INTERVAL_SECONDS, 600), 120, 3600),
-    cycleBudgetMs: clamp(num(process.env.OUTREACH_BUDGET_MS, 40000), 10000, 50000),
+    // Raised to the clamp ceiling: directory timeouts (12s x 3 retries per
+    // page) can consume the whole budget, which then defers the pitch of an
+    // already-eligible candidate with BUDGET_EXHAUSTED. The ceiling stays
+    // below the 60s Vercel maxDuration.
+    cycleBudgetMs: clamp(num(process.env.OUTREACH_BUDGET_MS, 50000), 10000, 55000),
     // Maxed at the clamp ceiling: micro-earnings are the priority right now,
     // so the daily pitch budget is fully aggressive.
     dailyCap: clamp(num(process.env.OUTREACH_DAILY_CAP, 20), 1, 20),

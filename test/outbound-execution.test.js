@@ -437,6 +437,7 @@ test("a directory page that fails does not stop the rest of the sweep", async ()
 
   assert.deepEqual(result.sources.directoryPages, [39, 40, 1]);
   assert.equal(result.sources.directory, 2, "the failed page is skipped, the others are kept");
+  assert.equal(result.sources.nextPageSafe, 2, "the cursor restarts after the last page that answered");
   const failed = result.errors.filter((error) => error.source === "directory");
   assert.equal(failed.length, 1);
   assert.equal(failed[0].page, 39);

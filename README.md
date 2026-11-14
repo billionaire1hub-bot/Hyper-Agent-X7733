@@ -487,7 +487,7 @@ Copy `.env.example` to `.env` and fill in:
 | `ACP_INTAKE_START_ID` | Optional | First job id to scan on a fresh deployment. Default 0 anchors the cursor at the current `jobCounter()` head instead of replaying history. |
 | `A2A_ENABLED` | Optional | `true` by default. Set `false` to disable `/a2a` and the agent cards. |
 | `OUTREACH_ENABLED` | Optional | `true` by default. Drives outbound discovery and pitching once `PUBLIC_BASE_URL` is configured or a trusted deployment URL is observed from the first inbound request. Set `false` to disable entirely. |
-| `OUTREACH_INTERVAL_SECONDS` / `OUTREACH_BUDGET_MS` | Optional | Local loop cadence (default 600, bounded 120–3600) and per-cycle wall-clock budget (default 40000, 10000–50000). |
+| `OUTREACH_INTERVAL_SECONDS` / `OUTREACH_BUDGET_MS` | Optional | Local loop cadence (default 600, bounded 120–3600) and per-cycle wall-clock budget (default 50000, 10000–55000, kept under the 60s function limit so directory retries cannot starve the pitch step). |
 | `OUTREACH_DAILY_CAP` / `OUTREACH_MAX_TARGETS` | Optional | Pitches per UTC day (default 20 — maxed for aggressive micro-earning, 1–20) and targets per cycle (default 5, 1–5). |
 | `OUTREACH_MIN_SCORE` / `OUTREACH_COOLDOWN_HOURS` | Optional | Minimum targeting score (default 10, 0–100 — low gate so micro-value targets still get pitched) and per-target cooldown (default 24 h, 6–720). |
 | `OUTREACH_SCAN_JOBS` | Optional | Recent on-chain jobs sampled for candidate discovery, default 300 (10–500). More jobs per cycle means more distinct active ACP participants get registry-enriched and probed for live endpoints. |

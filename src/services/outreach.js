@@ -815,7 +815,7 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
     summary.directoryStartPage = sweep.page;
     summary.directoryPages = discovery.sources?.directoryPages || [];
     summary.directoryNextPage = await saveDirectorySweep({
-      page: discovery.sources?.nextPage || 1,
+      page: discovery.sources?.nextPageSafe || discovery.sources?.nextPage || 1,
       pageCount: discovery.sources?.directorySweepPages || null,
     });
     summary.candidates = discovery.candidates.length;

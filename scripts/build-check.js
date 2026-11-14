@@ -598,7 +598,7 @@ check(
   discoverySource.includes("pagination[page]=") &&
     discoverySource.includes("pagination[pageSize]=") &&
     !discoverySource.includes("page=${Math.max") &&
-    discoverySource.includes('retries: 3, service: "virtuals-directory"') &&
+    discoverySource.includes('retries: 2, service: "virtuals-directory"') &&
     configSource.includes("OUTREACH_INDEX_URLS") &&
     configSource.includes("OUTREACH_INDEX_URL") &&
     configSource.includes("process.env.ACP_API_KEY") &&
@@ -618,7 +618,7 @@ check(
     sweepStateSource.includes("export function sweepTotalPages") &&
     outreachSource.includes("const sweep = await loadDirectorySweep()") &&
     outreachSource.includes("directoryMaxPages: sweep.maxPages") &&
-    outreachSource.includes("page: discovery.sources?.nextPage || 1") &&
+    outreachSource.includes("page: discovery.sources?.nextPageSafe || discovery.sources?.nextPage || 1") &&
     outreachSource.includes("pageCount: discovery.sources?.directorySweepPages || null") &&
     outreachSource.includes("pitchable.slice(0, config.outreach.maxCandidates)") &&
     storeSource.includes('outreachSweep: () => key("outreach:directory:sweep")') &&

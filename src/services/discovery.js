@@ -267,9 +267,10 @@ export async function fetchVirtualsDirectoryPage({
   const payload = await fetchJSON(
     `${target.base}${separator}pagination[page]=${pageNumber}&pagination[pageSize]=${size}`,
     {},
-    // Vercel egress to acpx.virtuals.io throttles intermittently, so the
-    // timeout is generous and every page gets three attempts.
-    { timeoutMs: 12000, retries: 3, service: "virtuals-directory" }
+    // Vercel egress to acpx.virtuals.io throttles intermittently. Pages get
+    // two attempts; failed pages re-enter next cycle through the safe cursor
+    // instead of burning the whole cycle budget on retries.
+    { timeoutMs: 10000, retries: 2, service: "virtuals-directory" }
   );
   const container = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
   const agents = container
@@ -970,6 +971,17 @@ export async function discoverTargets({
       directorySweepPages: directoryPageCount,
       directoryTotal: directoryTotal,
       nextPage: (pages[pages.length - 1] % Math.max(1, Number(directoryMaxPages) || 1)) + 1,
+      // The cursor advances only past the last page that actually answered;
+      // failed pages are re-read next cycle instead of being skipped until
+      // the sweep wraps around.
+      nextPageSafe: (() => {
+        const lastOkIndex = directoryResults.findLastIndex((outcome) => outcome.status === "fulfilled");
+        if (lastOkIndex === -1) return pages[0];
+        if (lastOkIndex === pages.length - 1) {
+          return (pages[pages.length - 1] % Math.max(1, Number(directoryMaxPages) || 1)) + 1;
+        }
+        return pages[lastOkIndex + 1];
+      })(),
       onchain: onchain.agents.length,
       jobsScanned: onchain.scanned,
       counter: onchain.counter,
