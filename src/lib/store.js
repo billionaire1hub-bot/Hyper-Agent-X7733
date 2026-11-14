@@ -169,6 +169,7 @@ export const storeHelpers = {
   outreachState: () => key("outreach:state"),
   outreachKick: () => key("outreach:kick"),
   outreachSweep: () => key("outreach:directory:sweep"),
+  outreachEndpoints: () => key("outreach:endpoints"),
   outreachSession: (sessionId) => key(`outreach:session:${sessionId}`),
   outreachContact: (targetKey) => key(`outreach:contact:${targetKey}`),
   outreachOptOut: () => key("outreach:optout"),

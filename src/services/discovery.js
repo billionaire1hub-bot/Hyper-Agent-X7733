@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { fetchJSON } from "../lib/http.js";
 import { logger } from "../lib/logger.js";
+import { store, storeHelpers } from "../lib/store.js";
 import { getAgentAddress } from "../chain/client.js";
 import { getAcpJobs, getJobCounter } from "./escrow.js";
 import { OFFERINGS, validateParams } from "./offerings.js";
@@ -605,6 +606,22 @@ export function directoryPageRange({ start = null, count = 1, max = 1, now = Dat
   return pages;
 }
 
+const ENDPOINT_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+const nowIso = () => new Date().toISOString();
+
+async function loadEndpointCache() {
+  const raw = await store.get(storeHelpers.outreachEndpoints()).catch(() => null);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+  return {};
+}
+
+async function saveEndpointCache(entries) {
+  await store
+    .set(storeHelpers.outreachEndpoints(), entries, { ttlSeconds: ENDPOINT_CACHE_TTL_SECONDS })
+    .catch((error) => logger.warn("endpoint cache save failed", { message: error.message }));
+}
+
 /**
  * Merges allowlisted targets, an optional authenticated index and recent
  * on-chain ACP participants, fetches a bounded number of live agent cards, and
@@ -625,6 +642,30 @@ export async function discoverTargets({
 } = {}) {
   const errors = [];
   const collected = [];
+
+  // Previously verified A2A endpoints re-enter the pool every cycle so the
+  // sweep moving on to other directory pages never strands a reachable
+  // counterparty. Entries are re-probed and dropped when they stop answering.
+  const endpointCache = await loadEndpointCache();
+  for (const [key, entry] of Object.entries(endpointCache)) {
+    if (!entry?.endpoint || !isPublicHttpUrl(entry.endpoint)) continue;
+    collected.push({
+      source: "endpoint_cache",
+      name: entry.name || null,
+      description: entry.description || null,
+      url: entry.endpoint,
+      address: null,
+      tags: [],
+      skills: Array.isArray(entry.skills) ? entry.skills : [],
+      tasks: [],
+      twitter: null,
+      chainIds: [],
+      activity: null,
+      card: { name: entry.name || null, description: entry.description || null, skills: entry.skills || [] },
+      endpoint: entry.endpoint,
+      cacheKey: key,
+    });
+  }
 
   for (const raw of targets) {
     const normalized = normalizeUrl(raw);
@@ -795,7 +836,11 @@ export async function discoverTargets({
 
   const fetchable = candidates
     .filter((candidate) => candidate.url || (candidate.resources || []).length)
-    .sort((a, b) => b.score - a.score)
+    // Cached endpoints probe last so the budget discovers new targets first.
+    .sort(
+      (a, b) =>
+        (a.source === "endpoint_cache") - (b.source === "endpoint_cache") || b.score - a.score
+    )
     .slice(0, Math.max(1, Number(cardLimit) || 1));
 
   await Promise.allSettled(
@@ -846,15 +891,39 @@ export async function discoverTargets({
         }
       }
       if (firstError) errors.push(firstError);
+
+      if (candidate.endpoint && candidate.card) {
+        // Keep every verified endpoint in the persistent contact pool.
+        const key = targetKey(candidate);
+        endpointCache[key] = {
+          endpoint: candidate.endpoint,
+          name: candidate.name || candidate.card?.name || null,
+          description: candidate.description || null,
+          skills: (candidate.skills || []).slice(0, 12),
+          at: nowIso(),
+        };
+        if (candidate.cacheKey && candidate.cacheKey !== key) delete endpointCache[candidate.cacheKey];
+      } else if (candidate.cacheKey && firstError) {
+        // A cached endpoint that no longer answers is dropped from the pool.
+        delete endpointCache[candidate.cacheKey];
+        candidate.endpoint = null;
+      }
     })
   );
+
+  await saveEndpointCache(endpointCache);
 
   // A published resource URL only becomes a pitch channel once its agent card
   // answers. Until then the operator allowlist stays the single trusted source
   // of an endpoint that was never probed, so a pitch can never be posted at a
   // marketing page or a dead host.
   for (const candidate of candidates) {
-    if (candidate.endpoint && !candidate.card && !String(candidate.source).includes("allowlist")) {
+    if (
+      candidate.endpoint &&
+      !candidate.card &&
+      !String(candidate.source).includes("allowlist") &&
+      !String(candidate.source).includes("endpoint_cache")
+    ) {
       candidate.endpoint = null;
     }
   }

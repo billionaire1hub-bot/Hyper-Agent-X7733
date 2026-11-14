@@ -511,3 +511,82 @@ test("sendA2APitch posts at the declared URL and falls back to /a2a on 404 only"
   assert.equal(third.ok, false);
   assert.deepEqual(calls2.map((entry) => entry.url), ["https://dead.example.com"], "a network failure is not retried on a subpath");
 });
+
+test("verified endpoints persist across cycles and dead ones are pruned", async () => {
+  const cacheKey = storeHelpers.outreachEndpoints();
+  await store.set(cacheKey, {
+    "url:https://cached.example.com": {
+      endpoint: "https://cached.example.com",
+      name: "Cached Desk",
+      description: "yield intel",
+      skills: [],
+      at: new Date().toISOString(),
+    },
+  });
+
+  stubFetch((url) => {
+    if (url === "https://cached.example.com/.well-known/agent-card.json") {
+      return { body: { name: "Cached Desk", skills: [{ name: "yield intel" }], url: "https://cached.example.com" } };
+    }
+    if (url.includes("acpx.virtuals.io")) return { body: { data: [] } };
+    return { body: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "rpc unavailable in test" } } };
+  });
+
+  const result = await discovery.discoverTargets({
+    scanJobs: 1,
+    targets: [],
+    indexUrl: "",
+    directoryPage: 1,
+    directoryPages: 1,
+    directoryMaxPages: 1,
+    directorySweep: true,
+  });
+
+  const cached = result.candidates.find((candidate) => candidate.name === "Cached Desk");
+  assert.ok(cached, "the cached endpoint re-enters the pool even though the sweep moved on");
+  assert.equal(cached.endpoint, "https://cached.example.com");
+  assert.ok(cached.channels.includes("a2a"));
+  assert.ok(cached.contactable);
+
+  const persisted = await store.get(cacheKey);
+  assert.ok(persisted && persisted["url:https://cached.example.com"], "the live endpoint stays cached");
+
+  await store.del(cacheKey);
+});
+
+test("a cached endpoint that stops answering is dropped from the pool", async () => {
+  const cacheKey = storeHelpers.outreachEndpoints();
+  await store.set(cacheKey, {
+    "url:https://dead-cached.example.com": {
+      endpoint: "https://dead-cached.example.com",
+      name: "Dead Desk",
+      description: null,
+      skills: [],
+      at: new Date().toISOString(),
+    },
+  });
+
+  stubFetch((url) => {
+    if (url.includes("dead-cached.example.com")) return { status: 404, body: {} };
+    if (url.includes("acpx.virtuals.io")) return { body: { data: [] } };
+    return { body: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "rpc unavailable in test" } } };
+  });
+
+  const result = await discovery.discoverTargets({
+    scanJobs: 1,
+    targets: [],
+    indexUrl: "",
+    directoryPage: 1,
+    directoryPages: 1,
+    directoryMaxPages: 1,
+    directorySweep: true,
+  });
+
+  const dead = result.candidates.find((candidate) => candidate.name === "Dead Desk");
+  assert.equal(dead?.endpoint ?? null, null, "the dead endpoint is not pitched");
+  assert.equal(dead?.contactable, false);
+  const persisted = await store.get(cacheKey);
+  assert.ok(!persisted || !persisted["url:https://dead-cached.example.com"], "the dead entry is pruned");
+
+  await store.del(cacheKey);
+});

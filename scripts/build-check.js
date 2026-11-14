@@ -580,6 +580,8 @@ check(
     discoverySource.includes("probeUrls") &&
     discoverySource.includes("resourceOrigins") &&
     discoverySource.includes("candidate.url || (candidate.resources || []).length") &&
+    discoverySource.includes("endpoint_cache") &&
+    discoverySource.includes("outreachEndpoints()") &&
     outreachSource.includes("export function candidateLiveChannel") &&
     outreachSource.includes("candidateLiveChannel(candidate, { xUsable })") &&
     outreachSource.includes("NO_LIVE_CHANNEL") &&
@@ -588,7 +590,7 @@ check(
     outreachSource.includes("summary.teaserAvailable") &&
     outreachSource.includes("analysis = fallbackAnalysis()") &&
     outreachSource.includes("teaser?.lines?.length"),
-  "directory sweep on by default and card probing widens to up to three published resource URLs per candidate so more live A2A endpoints surface; candidate selection keeps only live-channel targets and ranks A2A first; a missing market teaser no longer aborts the cycle and a failed AI analysis falls back to a deterministic catalogue pitch, so a reachable endpoint always receives a pitch"
+  "directory sweep on by default and card probing widens to up to three published resource URLs per candidate so more live A2A endpoints surface; verified endpoints persist in a cache and re-enter the pool every cycle (dead ones are pruned); candidate selection keeps only live-channel targets and ranks A2A first; a missing market teaser no longer aborts the cycle and a failed AI analysis falls back to a deterministic catalogue pitch, so a reachable endpoint always receives a pitch"
 );
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(
