@@ -279,6 +279,23 @@ export async function analyzeTarget(target, teaser) {
   };
 }
 
+/**
+ * Deterministic stand-in when AI analysis or the live teaser is unavailable:
+ * a generic catalogue pitch with the first intelligence offering. No invented
+ * pain points or hooks — the pitch stays factual, so a reachable endpoint is
+ * still contacted instead of silently skipped.
+ */
+export function fallbackAnalysis() {
+  return {
+    offeringId: OFFERING_MENU[0]?.id || "crypto_news",
+    complexity: 3,
+    painPoint: null,
+    hook: null,
+    confidence: 0,
+    engine: "fallback",
+  };
+}
+
 export async function deepGrounding(target) {
   if (!config.ai.geminiApiKey) return null;
   const domain = sanitizeText(target.description || target.name, 180);
@@ -305,8 +322,9 @@ export function buildPitch({ target, analysis, teaser, offering, quoteUsdc, sess
     analysis.painPoint ? `Noticed: ${analysis.painPoint}` : null,
     analysis.hook ? `Angle: ${analysis.hook}` : null,
     "",
-    `Live micro-alpha (fetched ${teaser.fetchedAt}):`,
-    ...teaser.lines.map((line) => `- ${line}`),
+    ...(teaser?.lines?.length
+      ? [`Live micro-alpha (fetched ${teaser.fetchedAt}):`, ...teaser.lines.map((line) => `- ${line}`)]
+      : []),
     "",
     `Offer: ${offering.name} (${offering.id}) — ${quote} USDC (list ${offering.priceUsdc}), SLA ${offering.slaSeconds}s, delivered through ACP escrow on Base.`,
   ];
@@ -832,12 +850,7 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
     }
 
     const teaser = await collectTeaser();
-    if (!teaser) {
-      state.lastAttemptAt = nowIso();
-      state.lastError = { code: "TEASER_UNAVAILABLE", message: "live market teaser providers failed", at: nowIso() };
-      await saveOutreachState(state);
-      return { ...summary, status: "degraded", reason: "TEASER_UNAVAILABLE" };
-    }
+    summary.teaserAvailable = Boolean(teaser);
 
     const wallet = getAgentAddress();
     let xAuthFailed = null;
@@ -853,11 +866,10 @@ export async function runOutreachCycle({ reason = "interval", force = false } = 
         break;
       }
 
-      const analysis = await analyzeTarget(candidate, teaser);
+      let analysis = await analyzeTarget(candidate, teaser);
       if (!analysis) {
-        summary.skipped += 1;
-        summary.outcomes.push({ target: candidate.name || candidate.key, action: "analysis_failed" });
-        continue;
+        analysis = fallbackAnalysis();
+        summary.fallbackPitches = (summary.fallbackPitches || 0) + 1;
       }
       if (analysis.noFit) {
         const xAskAvailable =

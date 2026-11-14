@@ -797,21 +797,34 @@ export async function discoverTargets({
 
   await Promise.allSettled(
     fetchable.map(async (candidate) => {
-      try {
-        const card = await fetchAgentCard(candidate.url);
-        candidate.card = card.card;
-        candidate.endpoint = card.endpoint;
-        candidate.name = candidate.name || card.name;
-        candidate.description = candidate.description || card.description;
-        candidate.skills = [...new Set([...(candidate.skills || []), ...(card.skills || [])])];
-      } catch (error) {
-        errors.push({
-          source: "card",
-          target: candidate.url,
-          code: error.code || "AGENT_CARD_FAILED",
-          message: error.message,
-        });
+      // Probe the primary URL and up to two more published resources, stopping
+      // at the first live A2A endpoint so dead marketing pages do not starve
+      // the candidate of a working contact channel.
+      const probeUrls = [...new Set([candidate.url, ...(candidate.resources || [])])]
+        .filter((url) => isPublicHttpUrl(url))
+        .slice(0, 3);
+      let firstError = null;
+      for (const url of probeUrls) {
+        try {
+          const card = await fetchAgentCard(url);
+          candidate.card = card.card;
+          candidate.endpoint = card.endpoint;
+          candidate.name = candidate.name || card.name;
+          candidate.description = candidate.description || card.description;
+          candidate.skills = [...new Set([...(candidate.skills || []), ...(card.skills || [])])];
+          if (card.endpoint) break;
+        } catch (error) {
+          if (!firstError) {
+            firstError = {
+              source: "card",
+              target: url,
+              code: error.code || "AGENT_CARD_FAILED",
+              message: error.message,
+            };
+          }
+        }
       }
+      if (firstError) errors.push(firstError);
     })
   );
 

@@ -235,6 +235,32 @@ test("teaser and pitch contain live facts and the escrow envelope", () => {
   assert.match(text, /5-minute limit/);
 });
 
+test("fallbackAnalysis and a null teaser never block a pitch", () => {
+  const fallback = outreach.fallbackAnalysis();
+  assert.equal(typeof fallback.offeringId, "string");
+  assert.ok(fallback.offeringId.length > 0);
+  assert.equal(fallback.complexity, 3);
+  assert.equal(fallback.painPoint, null);
+  assert.equal(fallback.hook, null);
+  assert.equal(fallback.engine, "fallback");
+
+  const offering = getOffering("yield_alpha");
+  const session = makeSession("pitch-null-teaser");
+  const text = outreach.buildPitch({
+    target: { name: "Yield Router" },
+    analysis: fallback,
+    teaser: null,
+    offering,
+    quoteUsdc: 0.005,
+    session,
+    wallet: "0x0000000000000000000000000000000000000001",
+  });
+  assert.match(text, /Hi Yield Router/);
+  assert.match(text, /Offer: .*yield_alpha/);
+  assert.doesNotMatch(text, /Live micro-alpha/);
+  assert.match(text, /\{"offeringId":"yield_alpha","params":\{\}\}/);
+});
+
 test("inbound replies drive sessions and honor opt-out", async () => {
   await putSession(makeSession("ctx-accept"));
   const accepted = await outreach.handleOutreachReply({ text: "deal at 0.03 USDC", contextId: "ctx-accept" });

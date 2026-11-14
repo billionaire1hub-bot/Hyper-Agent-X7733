@@ -577,11 +577,16 @@ check(
   configSource.includes("OUTREACH_DIRECTORY_SWEEP") &&
     discoverySource.includes("directorySweep = config.outreach.directorySweep") &&
     discoverySource.includes("directorySweep\n    ? directoryPageRange") &&
+    discoverySource.includes("probeUrls") &&
     outreachSource.includes("export function candidateLiveChannel") &&
     outreachSource.includes("candidateLiveChannel(candidate, { xUsable })") &&
     outreachSource.includes("NO_LIVE_CHANNEL") &&
-    outreachSource.includes("summary.channelBlocked"),
-  "the mass directory sweep is off by default; candidate selection keeps only live-channel targets (verified A2A endpoint, or X while usable) and ranks A2A first so dead X-only agents never crowd out pitchable targets; a cycle with candidates but no live channel reports NO_LIVE_CHANNEL instead of silently collecting"
+    outreachSource.includes("summary.channelBlocked") &&
+    outreachSource.includes("export function fallbackAnalysis") &&
+    outreachSource.includes("summary.teaserAvailable") &&
+    outreachSource.includes("analysis = fallbackAnalysis()") &&
+    outreachSource.includes("teaser?.lines?.length"),
+  "directory sweep on by default and card probing widens to up to three published resource URLs per candidate so more live A2A endpoints surface; candidate selection keeps only live-channel targets and ranks A2A first; a missing market teaser no longer aborts the cycle and a failed AI analysis falls back to a deterministic catalogue pitch, so a reachable endpoint always receives a pitch"
 );
 const sweepStateSource = await readFile(path.join(root, "src/services/outreach-session.js"), "utf8");
 check(

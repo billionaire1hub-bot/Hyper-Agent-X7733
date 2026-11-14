@@ -244,15 +244,14 @@ export const config = {
     // count, and once a cycle has seen it that number wins; this only covers
     // the very first cycle and the case where every page request failed.
     directoryMaxPages: clamp(num(process.env.OUTREACH_DIRECTORY_MAX_PAGES, 900), 1, 2000),
-    // Off by default: the mass directory sweep collected hundreds of X-only
-    // agents that can never be pitched (X is frozen), crowding out the few
-    // A2A-reachable targets. Discovery now focuses on sources that publish a
-    // verifiable A2A endpoint (index, on-chain registry, allowlist).
-    directorySweep: bool(process.env.OUTREACH_DIRECTORY_SWEEP, false),
+    // Discovery is ON: the sweep feeds the candidate population, but execution
+    // no longer blocks on zero-channel candidates — only live-channel targets
+    // (verified A2A endpoint, or X while usable) are pitched, A2A first.
+    directorySweep: bool(process.env.OUTREACH_DIRECTORY_SWEEP, true),
     maxCandidates: clamp(num(process.env.OUTREACH_MAX_CANDIDATES, 40), 5, 200),
-    // Doubled from 12: probe twice as many agent cards per cycle for live A2A
-    // endpoints so micro-gigs get captured from the long tail of the directory.
-    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 32), 3, 40),
+    // Maxed at the clamp ceiling: probe as many agent cards as a cycle allows
+    // so the most live A2A endpoints are discovered and pitched.
+    cardProbes: clamp(num(process.env.OUTREACH_CARD_PROBES, 40), 3, 40),
     sessionTtlSeconds: clamp(num(process.env.OUTREACH_SESSION_TTL_SECONDS, 300), 120, 600),
     extensionSeconds: clamp(num(process.env.OUTREACH_EXTENSION_SECONDS, 120), 30, 300),
     maxTurns: clamp(num(process.env.OUTREACH_MAX_TURNS, 6), 2, 12),
