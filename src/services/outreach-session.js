@@ -187,8 +187,10 @@ export const sessionTtlSeconds = SESSION_TTL_SECONDS;
  */
 export async function sendA2APitch({ endpoint, text, sessionId, offeringId, quoteUsdc, expiresAt, from = "" }) {
   const base = String(endpoint || "").replace(/\/+$/, "");
-  const url = base.endsWith("/a2a") ? base : `${base}/a2a`;
-  if (!isPublicHttpUrl(url)) return { ok: false, error: "endpoint is not a public HTTPS URL" };
+  // The A2A spec posts JSON-RPC at the card's declared URL; servers that
+  // expose the relay at a subpath answer at /a2a instead.
+  const candidates = base.endsWith("/a2a") ? [base] : [base, `${base}/a2a`];
+  let lastError = "endpoint is not a public HTTPS URL";
 
   const body = {
     jsonrpc: "2.0",
@@ -213,23 +215,30 @@ export async function sendA2APitch({ endpoint, text, sessionId, offeringId, quot
     },
   };
 
-  try {
-    const payload = await fetchJSON(
-      url,
-      { method: "POST", body: JSON.stringify(body) },
-      { timeoutMs: config.outreach.sendTimeoutMs, retries: 0, service: "a2a-outreach" }
-    );
-    if (payload?.error) {
-      return { ok: false, error: sanitizeText(payload.error.message, 200) || "target returned a JSON-RPC error" };
+  for (const url of candidates) {
+    if (!isPublicHttpUrl(url)) continue;
+    try {
+      const payload = await fetchJSON(
+        url,
+        { method: "POST", body: JSON.stringify(body) },
+        { timeoutMs: config.outreach.sendTimeoutMs, retries: 0, service: "a2a-outreach" }
+      );
+      if (payload?.error) {
+        return { ok: false, error: sanitizeText(payload.error.message, 200) || "target returned a JSON-RPC error" };
+      }
+      if (!payload?.result) return { ok: false, error: "target returned no JSON-RPC result" };
+      return {
+        ok: true,
+        kind: payload.result.kind || null,
+        taskId: payload.result.id || null,
+        contextId: payload.result.contextId || sessionId,
+      };
+    } catch (error) {
+      lastError = sanitizeText(error.message, 220);
+      // A 404 means the relay lives at the other candidate path; anything
+      // else (network failure, 403) will not improve by retrying a subpath.
+      if (!String(error.code || "").includes("404")) return { ok: false, error: lastError };
     }
-    if (!payload?.result) return { ok: false, error: "target returned no JSON-RPC result" };
-    return {
-      ok: true,
-      kind: payload.result.kind || null,
-      taskId: payload.result.id || null,
-      contextId: payload.result.contextId || sessionId,
-    };
-  } catch (error) {
-    return { ok: false, error: sanitizeText(error.message, 220) };
   }
+  return { ok: false, error: lastError };
 }

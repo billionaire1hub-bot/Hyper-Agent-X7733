@@ -14,6 +14,7 @@ const { ensureIntakeCursor } = await import("../src/services/intake.js");
 const { askJSON } = await import("../src/services/ai.js");
 const { getAgentAddress } = await import("../src/chain/client.js");
 const { getOffering } = await import("../src/services/offerings.js");
+const { sendA2APitch } = await import("../src/services/outreach-session.js");
 
 const realFetch = globalThis.fetch;
 const CLIENT = `0x${"cd".repeat(20)}`;
@@ -483,4 +484,30 @@ test("a directory agent with deep-path resources is probed at its origin and bec
   assert.ok(candidate.contactable);
   const deepProbe = urls.some((entry) => entry.url.includes("deep/api/path/.well-known"));
   assert.equal(deepProbe, false, "deep resource paths are not probed; the spec card lives at the domain root");
+});
+
+test("sendA2APitch posts at the declared URL and falls back to /a2a on 404 only", async () => {
+  const calls = [];
+  stubFetch((url) => {
+    calls.push(String(url));
+    if (url === "https://relay.example.com") return { status: 404, body: {} };
+    return { body: { result: { kind: "message", id: "t-1" } } };
+  });
+
+  const base = { text: "hi", sessionId: "s-1", offeringId: "yield_alpha", quoteUsdc: 0.005, expiresAt: new Date().toISOString() };
+  const first = await sendA2APitch({ endpoint: "https://relay.example.com", ...base });
+  assert.equal(first.ok, true, "the /a2a fallback recovers the 404");
+  assert.deepEqual(calls, ["https://relay.example.com", "https://relay.example.com/a2a"]);
+
+  calls.length = 0;
+  const second = await sendA2APitch({ endpoint: "https://direct.example.com", ...base });
+  assert.equal(second.ok, true);
+  assert.deepEqual(calls, ["https://direct.example.com"], "a live declared URL is not double-posted");
+
+  const calls2 = stubFetch(() => {
+    throw Object.assign(new Error("fetch failed"), { code: "A2A-OUTREACH_NETWORK_ERROR" });
+  });
+  const third = await sendA2APitch({ endpoint: "https://dead.example.com", ...base });
+  assert.equal(third.ok, false);
+  assert.deepEqual(calls2.map((entry) => entry.url), ["https://dead.example.com"], "a network failure is not retried on a subpath");
 });
