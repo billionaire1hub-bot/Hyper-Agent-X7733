@@ -212,7 +212,11 @@ export const config = {
     // zero, so nearly every contactable target passes the gate.
     minScore: clamp(num(process.env.OUTREACH_MIN_SCORE, 10), 0, 100),
     cooldownHours: clamp(num(process.env.OUTREACH_COOLDOWN_HOURS, 24), 6, 720),
-    scanJobs: clamp(num(process.env.OUTREACH_SCAN_JOBS, 60), 10, 200),
+    // Widened from 60: more recent ACP jobs scanned per cycle means more
+    // distinct active participants get registry-enriched and probed for live
+    // endpoints. Reads are multicalled in chunks of 25, so 300 jobs stays well
+    // inside the cycle budget.
+    scanJobs: clamp(num(process.env.OUTREACH_SCAN_JOBS, 300), 10, 500),
     indexUrl: str(
       process.env.OUTREACH_INDEX_URL,
       process.env.OUTREACH_INDEX_TOKEN || process.env.ACP_API_KEY ? "https://api.acp.virtuals.io/agents" : ""

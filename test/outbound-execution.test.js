@@ -440,3 +440,47 @@ test("a directory page that fails does not stop the rest of the sweep", async ()
   assert.equal(failed.length, 1);
   assert.equal(failed[0].page, 39);
 });
+
+test("a directory agent with deep-path resources is probed at its origin and becomes reachable", async () => {
+  const urls = stubFetch((url) => {
+    if (url === "https://alpha.example.com/.well-known/agent-card.json") {
+      return {
+        body: { name: "Alpha Desk", skills: [{ name: "yield intel" }], url: "https://alpha.example.com" },
+      };
+    }
+    if (url.includes("acpx.virtuals.io")) {
+      return {
+        body: {
+          data: [
+            {
+              name: "Alpha Desk",
+              description: "yield intelligence",
+              walletAddress: `0x${"ef".repeat(20)}`,
+              resources: [{ url: "https://alpha.example.com/deep/api/path" }, { url: "https://alpha.example.com/other" }],
+            },
+          ],
+        },
+      };
+    }
+    return { body: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "rpc unavailable in test" } } };
+  });
+
+  const result = await discovery.discoverTargets({
+    scanJobs: 1,
+    targets: [],
+    indexUrl: "",
+    directoryPage: 1,
+    directoryPages: 1,
+    directoryMaxPages: 1,
+    directorySweep: true,
+  });
+
+  const candidate = result.candidates.find((entry) => entry.name === "Alpha Desk");
+  assert.ok(candidate, "the directory agent survives discovery");
+  assert.equal(candidate.endpoint, "https://alpha.example.com", "the card at the origin answers and becomes the channel");
+  assert.ok(candidate.card, "the answered card is kept");
+  assert.ok(candidate.channels.includes("a2a"));
+  assert.ok(candidate.contactable);
+  const deepProbe = urls.some((entry) => entry.url.includes("deep/api/path/.well-known"));
+  assert.equal(deepProbe, false, "deep resource paths are not probed; the spec card lives at the domain root");
+});

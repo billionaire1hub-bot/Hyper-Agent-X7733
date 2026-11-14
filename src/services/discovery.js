@@ -775,7 +775,7 @@ export async function discoverTargets({
   // anonymous on-chain participant into a named agent with published tasks.
   const registryTargets = candidates
     .filter((candidate) => candidate.address && !candidate.name)
-    .slice(0, 8);
+    .slice(0, 20);
   await Promise.allSettled(
     registryTargets.map(async (candidate) => {
       const profile = await fetchRegistryAgent(candidate.address);
@@ -787,20 +787,41 @@ export async function discoverTargets({
       candidate.lastActiveAt = profile.lastActiveAt || candidate.lastActiveAt;
       candidate.registryId = profile.id || null;
       candidate.resources = profile.resources;
+      // Registry resources are the only published reachability hint for
+      // on-chain participants, so the first public one becomes the probe URL.
+      candidate.url = candidate.url || (candidate.resources || []).find((resource) => isPublicHttpUrl(resource)) || null;
     })
   );
 
   const fetchable = candidates
-    .filter((candidate) => candidate.url)
+    .filter((candidate) => candidate.url || (candidate.resources || []).length)
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(1, Number(cardLimit) || 1));
 
   await Promise.allSettled(
     fetchable.map(async (candidate) => {
-      // Probe the primary URL and up to two more published resources, stopping
-      // at the first live A2A endpoint so dead marketing pages do not starve
-      // the candidate of a working contact channel.
-      const probeUrls = [...new Set([candidate.url, ...(candidate.resources || [])])]
+      // Probe the primary URL and the origins of up to two more published
+      // resources (the A2A spec serves cards at the domain root), stopping at
+      // the first live endpoint so dead marketing pages do not starve the
+      // candidate of a working contact channel.
+      const resourceOrigins = (candidate.resources || []).map((resource) => {
+        try {
+          return new URL(resource).origin;
+        } catch {
+          return null;
+        }
+      });
+      const probeBase = (raw) => {
+        const value = firstString(raw);
+        if (!value) return null;
+        if (value.endsWith(".json")) return value;
+        try {
+          return new URL(value).origin;
+        } catch {
+          return null;
+        }
+      };
+      const probeUrls = [...new Set([probeBase(candidate.url), ...resourceOrigins])]
         .filter((url) => isPublicHttpUrl(url))
         .slice(0, 3);
       let firstError = null;

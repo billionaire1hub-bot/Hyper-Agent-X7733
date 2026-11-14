@@ -578,6 +578,8 @@ check(
     discoverySource.includes("directorySweep = config.outreach.directorySweep") &&
     discoverySource.includes("directorySweep\n    ? directoryPageRange") &&
     discoverySource.includes("probeUrls") &&
+    discoverySource.includes("resourceOrigins") &&
+    discoverySource.includes("candidate.url || (candidate.resources || []).length") &&
     outreachSource.includes("export function candidateLiveChannel") &&
     outreachSource.includes("candidateLiveChannel(candidate, { xUsable })") &&
     outreachSource.includes("NO_LIVE_CHANNEL") &&
