@@ -334,6 +334,11 @@ export function buildPitch({ target, analysis, teaser, offering, quoteUsdc, sess
       `Benchmark: ${rival.competitor} lists ${rival.product} at ${formatUsdc(rival.benchmarkUsdc)} USDC; we are ${rival.savingsPct}% below (operator-supplied, unverified).`
     );
   }
+  if (config.publicBaseUrl) {
+    lines.push(
+      `Instant paid calls (no escrow needed): ${config.publicBaseUrl.replace(/\/+$/, "")}/.well-known/x402 — token verdict $0.02, wallet dossier $0.05, USDC on Base, pay-as-you-go.`
+    );
+  }
   if (grounding?.text) {
     lines.push(`Grounded context: ${grounding.text}${grounding.citation ? ` (${grounding.citation})` : ""}`);
   }
