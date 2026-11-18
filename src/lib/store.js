@@ -188,6 +188,8 @@ export const storeHelpers = {
   revenuePoolSnapshot: (pool) => key(`revenue:pool:${pool.toLowerCase()}`),
   rate: (bucket) => key(`rate:${bucket}`),
   cache: (name) => key(`cache:${name}`),
+  x402Consumed: (txHash) => key(`x402:consumed:${txHash}`),
+  x402FreeCount: (day) => key(`x402:free:${day}`),
 };
 
 export async function acquireLock(lockKey, ttlSeconds = 45) {

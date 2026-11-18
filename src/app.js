@@ -6,6 +6,7 @@ import { logger } from "./lib/logger.js";
 import { maybeWakeOutreach, observePublicUrl, wakeOutreachCycle } from "./services/activation.js";
 import { a2aRouter } from "./routes/a2a.js";
 import { router } from "./routes/api.js";
+import { x402Router } from "./routes/x402.js";
 
 const app = express();
 
@@ -70,6 +71,7 @@ app.use(async (req, res, next) => {
 });
 
 app.use(a2aRouter);
+app.use(x402Router);
 app.use(router);
 
 app.use((req, res) => {
