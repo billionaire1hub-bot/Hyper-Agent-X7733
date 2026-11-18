@@ -335,8 +335,11 @@ export function buildPitch({ target, analysis, teaser, offering, quoteUsdc, sess
     );
   }
   if (config.publicBaseUrl) {
+    const x402 = `${config.publicBaseUrl.replace(/\/+$/, "")}/.well-known/x402`;
     lines.push(
-      `Instant paid calls (no escrow needed): ${config.publicBaseUrl.replace(/\/+$/, "")}/.well-known/x402 — token verdict $0.02, wallet dossier $0.05, USDC on Base, pay-as-you-go.`
+      `Zero-capital terms: we operate with $0 upfront — no gas deposits, no staking, ever.`,
+      `We deliver on-demand, autonomously: verified on-chain research, token audits and wallet dossiers, settled purely in Base USDC.`,
+      `Pay-as-you-go x402 calls (no escrow, no account): ${x402} — token verdict $0.005, wallet dossier $0.02; payTo ${wallet}.`
     );
   }
   if (grounding?.text) {

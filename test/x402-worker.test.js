@@ -38,10 +38,10 @@ test("manifest is x402 v2 with live status, facilitator and payTo", () => {
 
 test("token verdict and wallet dossier are listed with matching prices", () => {
   const byId = Object.fromEntries(X402_RESOURCES.map((resource) => [resource.id, resource]));
-  assert.equal(byId["token-verdict"].price, "$0.02");
-  assert.equal(byId["token-verdict"].priceUnits, 20000n);
-  assert.equal(byId["wallet-dossier"].price, "$0.05");
-  assert.equal(byId["wallet-dossier"].priceUnits, 50000n);
+  assert.equal(byId["token-verdict"].price, "$0.005");
+  assert.equal(byId["token-verdict"].priceUnits, 5000n);
+  assert.equal(byId["wallet-dossier"].price, "$0.02");
+  assert.equal(byId["wallet-dossier"].priceUnits, 20000n);
 });
 
 test("findUsdcPayment sums payer->payTo USDC transfers and ignores others", () => {
@@ -63,7 +63,7 @@ test("payment terms carry the wallet, amount and on-chain instructions", () => {
   assert.equal(terms.error.code, "PAYMENT_REQUIRED");
   assert.equal(terms.terms.asset, "USDC");
   assert.equal(terms.terms.token, USDC.address);
-  assert.equal(terms.terms.amount, "$0.02");
+  assert.equal(terms.terms.amount, "$0.005");
   assert.equal(terms.terms.network, "eip155:8453");
   assert.match(terms.terms.payTo, /^0x[0-9a-fA-F]{40}$/);
   assert.match(terms.terms.instructions, /payer/);

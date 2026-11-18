@@ -241,9 +241,29 @@ export const config = {
         ]
       ),
     ],
-    targets: list(process.env.OUTREACH_TARGETS),
+    // Operator allowlist plus seeded, known-live global agent surfaces with
+    // open A2A/HTTP contact paths (no staking, no KYC). Seeds are card-probed
+    // each cycle and enter the pitch pool when a live A2A endpoint answers.
+    targets: [
+      ...new Set([
+        ...list(process.env.OUTREACH_TARGETS),
+        "https://app.gtxagent.com",
+        "https://console.ax1.vc",
+        "https://agent402.tools",
+        "https://agent-data-tools.revmesh2074.workers.dev",
+        "https://blockrun.ai",
+        "https://api.loyalspark.online",
+        "https://x402.clashofcoins.com",
+        "https://api.nansen.ai",
+        "https://agent.pocket.network",
+        "https://stableenrich.dev",
+      ]),
+    ],
     keywords: list(process.env.OUTREACH_KEYWORDS),
-    xPitchEnabled: bool(process.env.OUTREACH_X_PITCH, true),
+    // X outreach is disabled by default: the X API plan is not paid, so the
+    // cycle wastes no calls on a dead channel. Set OUTREACH_X_PITCH=true only
+    // after an X plan is active again.
+    xPitchEnabled: bool(process.env.OUTREACH_X_PITCH, false),
     directoryUrl: str(process.env.OUTREACH_DIRECTORY_URL, "https://acpx.virtuals.io/api/agents"),
     registryUrl: str(process.env.OUTREACH_REGISTRY_URL, "https://api.acp.virtuals.io/agents"),
     directoryLimit: clamp(num(process.env.OUTREACH_DIRECTORY_LIMIT, 100), 5, 100),

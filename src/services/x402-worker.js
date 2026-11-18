@@ -12,8 +12,8 @@ export const X402_RESOURCES = [
     scheme: "exact",
     network: "eip155:8453",
     asset: "USDC",
-    price: "$0.02",
-    priceUnits: 2n * 10n ** 4n,
+    price: "$0.005",
+    priceUnits: 5n * 10n ** 3n,
     description:
       "Base token facts and verdict summary: symbol, decimals, total supply, address checksum and an honest allow/caution listing of what was verified on-chain.",
   },
@@ -24,8 +24,8 @@ export const X402_RESOURCES = [
     scheme: "exact",
     network: "eip155:8453",
     asset: "USDC",
-    price: "$0.05",
-    priceUnits: 5n * 10n ** 4n,
+    price: "$0.02",
+    priceUnits: 2n * 10n ** 4n,
     description:
       "Counterparty facts for a Base address: kind (EOA or contract), nonce, native balance, USDC balance, verified against the Base RPC with sources and timestamps.",
   },
